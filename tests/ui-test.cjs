@@ -1,0 +1,36 @@
+const { chromium }=require('playwright');
+const assert=require('node:assert/strict');
+const path=require('node:path');
+(async()=>{
+ const browser=await chromium.launch({headless:true});
+ const page=await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:1});
+ const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
+ await page.goto('http://127.0.0.1:8765');
+ await page.getByText('Your reports belong here').waitFor();
+ await page.screenshot({path:path.join(__dirname,'../docs/home-screen.png'),fullPage:true});
+ await page.locator('.nav [data-action="report"]').click();
+ await page.locator('#title').fill('Drain blocked near library');
+ await page.locator('#description').fill('Water has collected on the footpath.');
+ await page.locator('#city').fill('Hyderabad');await page.locator('#country').fill('India');
+ await page.locator('[data-action="save-draft"]').click();
+ await page.locator('.nav [data-action="mine"]').click();
+ await page.getByRole('heading',{name:'Drain blocked near library'}).waitFor();
+ await page.reload();
+ await page.locator('.nav [data-action="mine"]').click();
+ await page.getByRole('heading',{name:'Drain blocked near library'}).waitFor();
+ await page.locator('[data-action="edit-draft"]').click();
+ assert.equal(await page.locator('#city').inputValue(),'Hyderabad');
+ await page.screenshot({path:path.join(__dirname,'../docs/report-screen.png'),fullPage:true});
+ await page.locator('.nav [data-action="explore"]').click();
+ await page.locator('#query').fill('London');await page.locator('[data-action="search"]').click();
+ await page.getByText('Connect your CivicFix server in Settings. You can capture and save drafts now.').waitFor();
+ const rules=await page.evaluate(()=>{
+   const t=Date.now()/1000;const i={deadline:t-10,created:t-100,resolved:t-5};
+   return {status:state(i),time:timeClass(i),escaped:esc('<script>'),open:state({...i,resolved:null}),before:state({...i,resolved:null,deadline:t+10})};
+ });assert.deepEqual(rules,{status:'resolved',time:'late',escaped:'&lt;script&gt;',open:'overdue',before:'open'});
+ await page.locator('.nav [data-action="mine"]').click();await page.locator('[data-action="delete-draft"]').click();await page.getByText('No saved drafts').waitFor();
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ assert.deepEqual(errors,[]);
+ console.log('PASS: draft creation, persistence after reload, editing, deletion; disconnected search; status/time rules; escaping; mobile overflow; no JS errors.');
+ await browser.close();
+})().catch(e=>{console.error(e);process.exit(1)});
