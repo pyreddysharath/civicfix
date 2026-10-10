@@ -63,7 +63,7 @@ public class MainActivity extends Activity {
             HttpURLConnection c=null;
             try{
                 if(!path.startsWith("/") || path.startsWith("//") || path.contains("..") || !(method.equals("GET")||method.equals("POST")))throw new Exception("Invalid request");
-                String server=prefs.getString("server","");if(server.isEmpty())throw new Exception("Connect a server in Settings first.");
+                String server=prefs.getString("server","");if(server.isEmpty())throw new Exception("Set the server address under Server connection first.");
                 c=(HttpURLConnection)new URL(server+path).openConnection();c.setInstanceFollowRedirects(false);c.setConnectTimeout(15000);c.setReadTimeout(140000);c.setRequestMethod(method);
                 c.setRequestProperty("Authorization","Bearer "+prefs.getString("token",""));
                 if(method.equals("POST")){c.setDoOutput(true);c.setRequestProperty("Content-Type","application/json");try(OutputStream out=c.getOutputStream()){out.write(body.getBytes(StandardCharsets.UTF_8));}}
@@ -84,6 +84,15 @@ public class MainActivity extends Activity {
                 Intent intent=new Intent(MediaStore.ACTION_IMAGE_CAPTURE).putExtra(MediaStore.EXTRA_OUTPUT,uri).addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION|Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 intent.setClipData(ClipData.newRawUri("Capture",uri));startActivityForResult(intent,90);
             }catch(Exception e){captureId=null;reply(id,null,"Camera unavailable on this device.");}
+        });}
+        @JavascriptInterface public void choosePhoto(String id){main.post(()->{
+            if(captureId!=null){reply(id,null,"Photo picker is already open");return;}
+            captureId=id; captureTime=System.currentTimeMillis(); captureFile=null;
+            try{
+                Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*");
+                pick.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"image/jpeg","image/png","image/webp"});
+                startActivityForResult(pick,92);
+            }catch(Exception e){captureId=null;reply(id,null,"Photo picker unavailable. Please use the camera.");}
         });}
         @JavascriptInterface public void location(String id){main.post(()->{
             if(locationId!=null){reply(id,null,"Location request already running");return;}
@@ -117,13 +126,33 @@ public class MainActivity extends Activity {
         }catch(Exception e){stopLocation();String id=locationId;locationId=null;reply(id,null,"Enable location access in Android settings, then retry.");}
     }
     void stopLocation(){if(lm!=null&&listener!=null)lm.removeUpdates(listener);listener=null;}
-    @Override public void onRequestPermissionsResult(int req,String[] permissions,int[] grants){super.onRequestPermissionsResult(req,permissions,grants);if(req==91){if(checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED)locate();else{reply(locationId,null,"Location permission denied. You can save a draft and retry later.");locationId=null;}}}
+    @Override public void onRequestPermissionsResult(int req,String[] permissions,int[] grants){super.onRequestPermissionsResult(req,permissions,grants);if(req==91){if(checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED)locate();else{reply(locationId,null,"Location permission denied. Enable location access and retry.");locationId=null;}}}
     @Override protected void onActivityResult(int req,int result,Intent data){
-        super.onActivityResult(req,result,data);if(req!=90)return;
+        super.onActivityResult(req,result,data);if(req!=90&&req!=92)return;
+        if(req==92){
+            final String pickerId=captureId;captureId=null;
+            if(result!=RESULT_OK||data==null||data.getData()==null){reply(pickerId,null,"No image selected");return;}
+            final Uri picked=data.getData();final long pickedTime=captureTime;
+            io.execute(()->{
+                File file=null;
+                try{
+                    file=File.createTempFile("selected_",".jpg",getCacheDir());
+                    try(InputStream in=getContentResolver().openInputStream(picked);OutputStream out=new FileOutputStream(file)){
+                        if(in==null)throw new IOException();byte[] buffer=new byte[8192];int n,total=0;
+                        while((n=in.read(buffer))!=-1){total+=n;if(total>10*1024*1024)throw new IOException();out.write(buffer,0,n);}
+                    }
+                    encodePhoto(pickerId,file,pickedTime);
+                }catch(Exception e){if(file!=null)file.delete();reply(pickerId,null,"Choose a JPEG, PNG or WebP photo under 10 MB.");}
+            });return;
+        }
         final String id=captureId;final File f=captureFile;final long time=captureTime;captureId=null;
         if(result!=RESULT_OK){if(f!=null)f.delete();reply(id,null,"Camera cancelled");return;}
-        io.execute(()->{try{
+        io.execute(()->encodePhoto(id,f,time));
+    }
+    void encodePhoto(String id,File f,long time){
+        try{
             BitmapFactory.Options bounds=new BitmapFactory.Options();bounds.inJustDecodeBounds=true;BitmapFactory.decodeFile(f.getAbsolutePath(),bounds);
+            if(bounds.outWidth<160||bounds.outHeight<160||((long)bounds.outWidth*bounds.outHeight)>20000000)throw new IOException();
             BitmapFactory.Options opts=new BitmapFactory.Options();opts.inSampleSize=Math.max(1,Math.max(bounds.outWidth,bounds.outHeight)/1600);
             Bitmap bitmap=BitmapFactory.decodeFile(f.getAbsolutePath(),opts);if(bitmap==null)throw new Exception();
             ExifInterface exif=new ExifInterface(f.getAbsolutePath());int orientation=exif.getAttributeInt(ExifInterface.TAG_ORIENTATION,ExifInterface.ORIENTATION_NORMAL);Matrix m=new Matrix();
@@ -132,7 +161,7 @@ public class MainActivity extends Activity {
             float ratio=Math.min(1,1600f/Math.max(fixed.getWidth(),fixed.getHeight()));Bitmap resized=Bitmap.createScaledBitmap(fixed,Math.max(1,Math.round(fixed.getWidth()*ratio)),Math.max(1,Math.round(fixed.getHeight()*ratio)),true);
             ByteArrayOutputStream out=new ByteArrayOutputStream();resized.compress(Bitmap.CompressFormat.JPEG,85,out);
             JSONObject j=new JSONObject();j.put("photo","data:image/jpeg;base64,"+Base64.encodeToString(out.toByteArray(),Base64.NO_WRAP));j.put("captured",time/1000d);reply(id,j,null);
-        }catch(Exception e){reply(id,null,"Unable to read captured photo. Please retry.");}finally{if(f!=null)f.delete();}});
+        }catch(Exception e){reply(id,null,"Unable to read captured photo. Please retry.");}finally{if(f!=null)f.delete();}
     }
     @Override public void onBackPressed(){web.evaluateJavascript("window.appBack()",null);}
     @Override protected void onDestroy(){stopLocation();io.shutdown();super.onDestroy();}
