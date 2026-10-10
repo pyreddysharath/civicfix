@@ -3,6 +3,8 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pending=new Map();
 let config=window.Native?JSON.parse(Native.config()):{server:location.origin,user:{}};
+const DEMO_LOGIN=true; // Temporary preview: no server authentication or account access.
+let demoSession=false,demoIssues=[];
 let currentUser=null, mode='login', active='report', report=null, selected=null, issues=[], reporter=null, listVersion=0;
 let verifiedEmail='',verificationToken='',otpEmail='',resendAt=0,authBusy=false,reportBusy=false,resolveBusy=false;
 let filters={status:'',country:'',city:'',street:''};
@@ -10,6 +12,22 @@ let webToken=sessionStorage.getItem('civicfix-session')||'';
 window.nativeReply=(id,result,error)=>{const p=pending.get(id);if(!p)return;clearTimeout(p.timer);pending.delete(id);error?p.reject(Error(error)):p.resolve(result);};
 function nativeCall(method,...args){return new Promise((resolve,reject)=>{const id=crypto.randomUUID();const timer=setTimeout(()=>{pending.delete(id);reject(Error('Request timed out. Please try again.'));},150000);pending.set(id,{resolve,reject,timer});Native[method](id,...args);});}
 async function api(method,path,body={}){
+ if(demoSession){
+  if(method==='GET'&&path.startsWith('/issues?'))return {items:demoIssues,next_offset:null};
+  if(method==='POST'&&path==='/issues'){
+   const created=Date.now()/1000;
+   const issue={...body,id:crypto.randomUUID(),user_id:currentUser.id,reporter:currentUser.name,created,deadline:created+body.eta_days*86400,resolved:null,thumbnail:body.photo,proofs:[]};
+   demoIssues.unshift(issue);return issue;
+  }
+  const match=path.match(/^\/issues\/([^/]+)(\/resolve)?$/);
+  if(match){const issue=demoIssues.find(i=>i.id===decodeURIComponent(match[1]));if(!issue)throw Error('Demo issue not found.');
+   if(method==='POST'&&match[2]){issue.resolved=issue.resolved??Date.now()/1000;if(body.photo)issue.proofs=[{photo:body.photo,accepted:true}];}
+   return {...issue};
+  }
+  if(path==='/auth/logout')return {};
+  throw Error('This action requires a connected account.');
+ }
+
  if(window.Native){if(!config.server)throw Error('Set the server address under Server connection to continue.');return nativeCall('request',method,path,JSON.stringify(body));}
  const response=await fetch(path,{method,headers:{'Content-Type':'application/json','Authorization':'Bearer '+webToken},...(method==='POST'?{body:JSON.stringify(body)}:{})});
  let data;try{data=await response.json();}catch{throw Error('The CivicFix server is not available.');}
@@ -27,7 +45,7 @@ function shell(html){$('#app').innerHTML=header()+`<main>${html}</main>`;}
 function authPage(){
  currentUser=null;report=null;selected=null;issues=[];listVersion++;
  shell(`<section class="panel auth"><h1>${mode==='register'?'Create an account':'Welcome back'}</h1><p class="subtle">${mode==='register'?'Verify your email to get started.':'Log in to report and track local issues.'}</p>
- <form id="auth-form"><label>Email ID<input id="email" name="email" type="email" autocomplete="email" maxlength="254" required></label>
+ <form id="auth-form" ${DEMO_LOGIN&&mode==='login'?'novalidate':''}><label>Email ID<input id="email" name="email" type="email" autocomplete="email" maxlength="254" required></label>
  ${mode==='register'?`<div class="email-actions"><button type="button" class="secondary" id="send-code">Send OTP</button><span id="email-status" role="status"></span></div><div id="otp-section" hidden><label>Verification code<input id="otp" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="6-digit OTP"></label><button type="button" class="secondary" id="verify-code">Verify email</button></div><label>Name<input id="name" autocomplete="name" maxlength="80" required></label>`:''}
  <label>Password<input id="password" name="password" type="password" autocomplete="${mode==='register'?'new-password':'current-password'}" ${mode==='register'?'minlength="10"':''} maxlength="200" required></label>
  ${mode==='register'?'<p class="hint">Use at least 10 characters.</p><label>Confirm password<input id="confirm-password" type="password" autocomplete="new-password" maxlength="200" required></label>':''}
@@ -58,6 +76,7 @@ async function verifyCode(){
 }
 async function submitAuth(event){
  event.preventDefault();if(authBusy)return;
+ if(DEMO_LOGIN&&mode==='login'){demoSession=true;currentUser={id:'demo-user',name:'Demo User'};active='report';landing();toast('Login successful — demo mode.');return;}
  const email=$('#email').value.trim().toLowerCase(),password=$('#password').value;
  if(mode==='register'&&(verifiedEmail!==email||!verificationToken)){$('#auth-error').textContent='Verify your email before creating an account.';return;}
  if(mode==='register'&&password!==$('#confirm-password').value){$('#auth-error').textContent='Passwords do not match.';return;}
@@ -67,7 +86,7 @@ async function submitAuth(event){
  catch(e){$('#auth-error').textContent=e.message;}finally{authBusy=false;if($('#auth-form'))setAuthBusy(false);}
 }
 function landing(){
- shell(`<div class="welcome"><h1>Hello, ${esc(currentUser.name)}</h1><p class="subtle">Report a problem. Keep track of its progress.</p></div><div class="actions" aria-label="Issue actions"><button data-action="report" class="${active==='report'?'primary':'secondary'}" aria-pressed="${active==='report'}">Report an Issue</button><button data-action="mine" class="${active==='mine'?'primary':'secondary'}" aria-pressed="${active==='mine'}">My Reported Issues</button></div><div id="content"></div>`);
+ shell(`<div class="welcome"><h1>Hello, ${esc(currentUser.name)}</h1><p class="subtle">Report a problem. Keep track of its progress.</p></div><div class="actions" aria-label="Issue actions"><button data-action="report" class="${active==='report'?'primary':'secondary'}" aria-pressed="${active==='report'}">Report an Issue</button><button data-action="mine" class="${active==='mine'?'primary':'secondary'}" aria-pressed="${active==='mine'}">My Reported Issues</button></div><div id="content"></div>${demoSession?'<p class="hint">Demo mode · Reports stay in this session and are cleared on logout or app restart.</p>':''}`);
  if(active==='report')renderReport();else loadIssues();
 }
 function saveReportFields(){if($('#report-form')&&report){report.title=$('#title').value;report.description=$('#description').value;report.eta_days=$('#eta').value;}}
@@ -153,7 +172,7 @@ document.addEventListener('click',async event=>{
  const button=event.target.closest('[data-action]');if(!button)return;event.preventDefault();const action=button.dataset.action;
  if(authBusy||reportBusy||resolveBusy)return;
  if(action==='switch-auth'){mode=mode==='login'?'register':'login';verifiedEmail='';verificationToken='';authPage();}
- if(action==='logout'){try{await api('POST','/auth/logout');}catch{}if(window.Native)Native.logout();webToken='';sessionStorage.removeItem('civicfix-session');currentUser=null;mode='login';authPage();}
+ if(action==='logout'){try{await api('POST','/auth/logout');}catch{}if(!demoSession){if(window.Native)Native.logout();webToken='';sessionStorage.removeItem('civicfix-session');}demoSession=false;demoIssues=[];currentUser=null;mode='login';authPage();}
  if(action==='report'||action==='home'){if(!currentUser)return;saveReportFields();active='report';listVersion++;selected=null;landing();}
  if(action==='mine'){saveReportFields();active='mine';reporter=null;filters={status:'',country:'',city:'',street:''};landing();}
  if(action==='retry-list')loadIssues();
@@ -168,4 +187,4 @@ document.addEventListener('click',async event=>{
 window.appBack=()=>{if(selected){selected=null;$('#issue-detail').innerHTML='';renderCards();}else if(mode==='register'&&!currentUser){mode='login';authPage();}else if(currentUser&&active==='mine'){active='report';landing();}};
 let lastTimeSignature='';
 setInterval(()=>{if(active==='mine'&&currentUser){const signature=issues.map(i=>status(i)+elapsed(i)).join('|');if(signature!==lastTimeSignature){renderCards();lastTimeSignature=signature;}if(selected?.deadline&&$('#detail-status')){$('#detail-status').innerHTML=badge(selected);$('#detail-elapsed').textContent=elapsed(selected);}}},1000);
-(async()=>{if(config.user?.id||webToken){shell('<section class="panel"><p role="status">Signing in…</p></section>');try{currentUser=await api('GET','/me');landing();return;}catch{if(window.Native)Native.logout();webToken='';sessionStorage.removeItem('civicfix-session');}}authPage();})();
+(async()=>{if(!DEMO_LOGIN&&(config.user?.id||webToken)){shell('<section class="panel"><p role="status">Signing in…</p></section>');try{currentUser=await api('GET','/me');landing();return;}catch{if(window.Native)Native.logout();webToken='';sessionStorage.removeItem('civicfix-session');}}authPage();})();
