@@ -1,4 +1,6 @@
 """CivicFix pilot API. Python 3.11+, Pillow; use Gunicorn behind HTTPS for deployment."""
+import re, smtplib, ssl
+from email.message import EmailMessage
 import base64, hashlib, hmac, io, json, math, os, secrets, sqlite3, time, urllib.request, urllib.error
 from pathlib import Path
 from contextlib import contextmanager
@@ -25,6 +27,8 @@ def init_db():
         db.executescript('''
         PRAGMA journal_mode=WAL;
         CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, username TEXT UNIQUE, name TEXT, salt TEXT, password TEXT);
+        CREATE TABLE IF NOT EXISTS email_verifications(email TEXT PRIMARY KEY, challenge TEXT, salt TEXT, code_hash TEXT,
+          expires REAL, attempts INTEGER, verification_hash TEXT, verified_until REAL);
         CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, user_id TEXT REFERENCES users(id), expires REAL);
         CREATE TABLE IF NOT EXISTS issues(id TEXT PRIMARY KEY, user_id TEXT REFERENCES users(id), created REAL, deadline REAL,
           resolved REAL, title TEXT, description TEXT, category TEXT, street TEXT, city TEXT, state TEXT, country TEXT,
@@ -71,6 +75,76 @@ def session(u):
     token=secrets.token_urlsafe(40)
     with database() as db: db.execute('INSERT INTO sessions VALUES(?,?,?)',(hashlib.sha256(token.encode()).hexdigest(),u['id'],now()+30*86400))
     return {'token':token,'user':public_user(u)}
+def email_address(body):
+    email=text(body,'email',254).lower()
+    if not re.fullmatch(r"[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,63}",email):
+        raise ApiError('Enter a valid email address.')
+    return email
+
+def send_email_otp(email, code):
+    host=os.environ.get('SMTP_HOST'); sender=os.environ.get('SMTP_FROM')
+    if not host or not sender: raise ApiError('Email verification is not configured. Please contact the app administrator.',503)
+    message=EmailMessage(); message['From']=sender; message['To']=email; message['Subject']='Your CivicFix verification code'
+    message.set_content(f'Your CivicFix verification code is {code}. It expires in 10 minutes.\n\nIf you did not request this code, ignore this email.')
+    try:
+        port=int(os.environ.get('SMTP_PORT','587')); context=ssl.create_default_context()
+        connection=smtplib.SMTP_SSL(host,port,timeout=20,context=context) if port==465 else smtplib.SMTP(host,port,timeout=20)
+        with connection as mail:
+            if port!=465: mail.starttls(context=context)
+            if os.environ.get('SMTP_USER'): mail.login(os.environ['SMTP_USER'],os.environ.get('SMTP_PASSWORD',''))
+            mail.send_message(message)
+    except (OSError,smtplib.SMTPException,ValueError):
+        raise ApiError('The verification email could not be sent. Please try again later.',503)
+
+def email_auth(path, body, ip):
+    rate('auth:'+ip,60)
+    email=email_address(body)
+    if path=='/auth/send-otp':
+        rate('otp-ip:'+ip,20); rate('otp-email:'+email,5); rate('otp-cooldown:'+email,1,60)
+        code=f'{secrets.randbelow(1000000):06d}'; salt=secrets.token_hex(16); challenge=secrets.token_hex(16)
+        with database() as db:
+            db.execute('INSERT OR REPLACE INTO email_verifications VALUES(?,?,?,?,?,0,NULL,NULL)',(email,challenge,salt,password_hash(code,salt),now()+600))
+        try: send_email_otp(email,code)
+        except ApiError:
+            with database() as db: db.execute('DELETE FROM email_verifications WHERE email=? AND challenge=?',(email,challenge))
+            raise
+        return {'ok':True,'message':'Verification code sent. Check your inbox and spam folder.','expires_in':600,'resend_after':60}
+    if path=='/auth/verify-otp':
+        code=text(body,'code',6)
+        if not re.fullmatch(r'[0-9]{6}',code): raise ApiError('Enter the 6-digit verification code.')
+        verification=secrets.token_urlsafe(40); valid=False
+        with database() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT * FROM email_verifications WHERE email=?',(email,)).fetchone()
+            if row and row['expires']>now() and row['attempts']<5 and not row['verification_hash']:
+                db.execute('UPDATE email_verifications SET attempts=attempts+1 WHERE email=?',(email,))
+                valid=hmac.compare_digest(row['code_hash'],password_hash(code,row['salt']))
+                if valid: db.execute('UPDATE email_verifications SET verification_hash=?, verified_until=? WHERE email=?',(hashlib.sha256(verification.encode()).hexdigest(),now()+600,email))
+        if not valid: raise ApiError('Invalid or expired code. After 5 attempts, request a new code.',400)
+        return {'verification_token':verification,'expires_in':600}
+    if path=='/auth/register':
+        password=text(body,'password',200); name=text(body,'name',80)
+        if len(password)<10: raise ApiError('Use a password of at least 10 characters.')
+        verification=text(body,'verification_token',200); salt=secrets.token_hex(16)
+        u={'id':secrets.token_hex(12),'username':email,'name':name,'salt':salt,'password':password_hash(password,salt)}
+        with database() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row=db.execute('SELECT * FROM email_verifications WHERE email=?',(email,)).fetchone()
+            if not row or not row['verification_hash'] or (row['verified_until'] or 0)<=now() or not hmac.compare_digest(row['verification_hash'],hashlib.sha256(verification.encode()).hexdigest()):
+                raise ApiError('Verify this email address before creating an account.')
+            try: db.execute('INSERT INTO users VALUES(:id,:username,:name,:salt,:password)',u)
+            except sqlite3.IntegrityError: raise ApiError('An account already exists for this email. Please log in.',409)
+            db.execute('DELETE FROM email_verifications WHERE email=?',(email,))
+        return session(u)
+    if path=='/auth/login':
+        password=text(body,'password',200)
+        with database() as db: row=db.execute('SELECT * FROM users WHERE username=?',(email,)).fetchone()
+        salt=row['salt'] if row else '00'*16
+        candidate=password_hash(password,salt)
+        if not row or not hmac.compare_digest(row['password'],candidate): raise ApiError('Incorrect email or password.',401)
+        return session(dict(row))
+    raise ApiError('Not found',404)
+
 def clean_photo(value):
     try:
         if not isinstance(value,str) or len(value)>7_000_000: raise ValueError()
@@ -118,7 +192,7 @@ def validate_proof(issue, proof, photo):
     return {'decision':'accepted' if accepted else 'review','reason':str(r.get('reason','Review required'))[:2000],'confidence':confidence,'method':'AI visual comparison; not independently verified'}
 
 def issue_view(row, detail=False):
-    r=dict(row); r.pop('photo',None); r.pop('request_id',None)
+    r=dict(row); r.pop('photo',None); r.pop('request_id',None); r.pop('username',None)
     r['analysis']=json.loads(r.get('analysis') or '{}')
     r['status']='resolved' if r['resolved'] is not None else ('overdue' if now()>=r['deadline'] else 'open')
     r['elapsed_seconds']=max(0,(r['resolved'] or now())-r['created'])
@@ -127,7 +201,7 @@ def issue_view(row, detail=False):
         r['photo']=data_url(row['photo'])
         with database() as db:
             proofs=db.execute('SELECT p.*, u.name AS contributor, u.username FROM proofs p JOIN users u ON p.user_id=u.id WHERE issue_id=? ORDER BY created DESC',(r['id'],)).fetchall()
-            r['proofs']=[{**{k:p[k] for k in ('id','created','note','contributor','username','accepted')},'photo':data_url(p['photo']),'result':json.loads(p['result'])} for p in proofs]
+            r['proofs']=[{**{k:p[k] for k in ('id','created','note','contributor','accepted')},'photo':data_url(p['photo']),'result':json.loads(p['result'])} for p in proofs]
             r['events']=[dict(e) for e in db.execute('SELECT created,actor,action,note FROM events WHERE issue_id=? ORDER BY id DESC',(r['id'],))]
     return r
 
@@ -138,27 +212,16 @@ def get_issue(id):
 
 def dispatch(method,path,query,body,token,ip):
     if path=='/health': return {'ok':True,'ai_enabled':bool(os.environ.get('OPENAI_API_KEY') and os.environ.get('OPENAI_VISION_MODEL'))}
-    if method=='POST' and path in ('/auth/register','/auth/login'):
-        rate('auth:'+ip,30)
-        username=text(body,'username',40).lower(); password=text(body,'password',200)
-        if not all(c.isascii() and (c.isalnum() or c in '._-') for c in username): raise ApiError('Username: use letters, numbers, dot, underscore or hyphen.')
-        if path.endswith('register'):
-            if len(password)<10: raise ApiError('Use a password of at least 10 characters.')
-            name=text(body,'name',80); salt=secrets.token_hex(16)
-            u={'id':secrets.token_hex(12),'username':username,'name':name,'salt':salt,'password':password_hash(password,salt)}
-            try:
-                with database() as db: db.execute('INSERT INTO users VALUES(:id,:username,:name,:salt,:password)',u)
-            except sqlite3.IntegrityError: raise ApiError('Username already exists.',409)
-        else:
-            with database() as db: row=db.execute('SELECT * FROM users WHERE username=?',(username,)).fetchone()
-            if not row or not hmac.compare_digest(row['password'],password_hash(password,row['salt'])): raise ApiError('Incorrect username or password.',401)
-            u=dict(row)
-        return session(u)
+    if method=='POST' and path.startswith('/auth/') and path!='/auth/logout':
+        return email_auth(path, body, ip)
     u=auth(token)
     if method=='POST' and path=='/auth/logout':
         with database() as db: db.execute('DELETE FROM sessions WHERE token=?',(hashlib.sha256(token.encode()).hexdigest(),))
         return {'ok':True}
     if method=='GET' and path=='/me': return public_user(u)
+    if method=='POST' and path=='/location':
+        # Browsers have GPS but no native reverse geocoder. Android uses its built-in Geocoder.
+        raise ApiError('Address detection is available in the Android app. Open CivicFix on Android to report an issue.',503)
     if method=='POST' and path=='/analyze':
         rate('ai:'+u['id'],30); photo,_=clean_photo(body.get('photo'))
         return analyze(photo,text(body,'description',3000,False))
@@ -168,12 +231,13 @@ def dispatch(method,path,query,body,token,ip):
         if old: return issue_view(get_issue(old['id']),True)
         rate('report:'+u['id'],30)
         lat,lon,accuracy,captured=gps(body)
-        deadline=number(body,'deadline',now()+60,now()+366*86400)
-        photo,thumbnail=clean_photo(body.get('photo')); category=text(body,'category',40)
+        eta_days=number(body,'eta_days',7,366)
+        if not eta_days.is_integer(): raise ApiError('ETA must be a whole number of days, at least 7.')
+        photo,thumbnail=clean_photo(body.get('photo')); category=text(body,'category',40,False) or 'Other'
         if category not in CATEGORIES: raise ApiError('Invalid category')
         # Analysis is server-owned; do not trust client AI claims.
-        analysis=analyze(photo,text(body,'description',3000)); id=secrets.token_hex(12); created=now()
-        params=(id,u['id'],created,deadline,None,text(body,'title',160),text(body,'description',3000),category,
+        analysis={}; id=secrets.token_hex(12); created=now(); deadline=created+eta_days*86400
+        params=(id,u['id'],created,deadline,None,text(body,'title',160),text(body,'description',3000,False),category,
                 text(body,'street',200,False),text(body,'city',100),text(body,'state',100,False),text(body,'country',100),lat,lon,accuracy,captured,photo,thumbnail,json.dumps(analysis),request_id)
         try:
             with database() as db:
@@ -189,11 +253,16 @@ def dispatch(method,path,query,body,token,ip):
             # instr treats %, _ and other query characters literally.
             where.append("instr(lower(i.title||' '||i.description||' '||i.street||' '||i.city||' '||i.state||' '||i.country||' '||u.name||' '||u.username||' '||coalesce((SELECT group_concat(pu.name||' '||pu.username,' ') FROM proofs p JOIN users pu ON pu.id=p.user_id WHERE p.issue_id=i.id),'')),?)>0"); args.append(q)
         if query.get('mine')=='1': where.append('i.user_id=?'); args.append(u['id'])
+        if query.get('reporter_id'): where.append('i.user_id=?'); args.append(query['reporter_id'])
+        for field in ('country','city','street'):
+            value=query.get(field,'').strip()
+            if len(value)>200: raise ApiError('Filter is too long')
+            if value: where.append('lower(i.'+field+')=lower(?)'); args.append(value)
         category=query.get('category','')
         if category: where.append('i.category=?'); args.append(category)
         status=query.get('status','')
         if status=='resolved': where.append('i.resolved IS NOT NULL')
-        if status=='open': where.append('i.resolved IS NULL')
+        if status=='open': where.append('i.resolved IS NULL AND i.deadline>?'); args.append(now())
         if status=='overdue': where.append('i.resolved IS NULL AND i.deadline<=?'); args.append(now())
         with database() as db: rows=db.execute('SELECT i.*,u.name AS reporter,u.username FROM issues i JOIN users u ON i.user_id=u.id WHERE '+' AND '.join(where)+' ORDER BY i.created DESC',args).fetchall()
         if 'lat' in query:
@@ -214,6 +283,20 @@ def dispatch(method,path,query,body,token,ip):
     if len(parts)>=2 and parts[0]=='issues':
         issue=get_issue(parts[1])
         if len(parts)==2 and method=='GET': return issue_view(issue,True)
+        if len(parts)==3 and parts[2]=='resolve' and method=='POST':
+            if issue['user_id']!=u['id']: raise ApiError('Only the person who raised this issue can mark it resolved.',403)
+            if issue['resolved'] is not None: return issue_view(issue,True)
+            photo=clean_photo(body['photo'])[0] if body.get('photo') else None
+            t=now()
+            with database() as db:
+                db.execute('BEGIN IMMEDIATE')
+                changed=db.execute('UPDATE issues SET resolved=? WHERE id=? AND resolved IS NULL',(t,issue['id'])).rowcount
+                if changed:
+                    if photo:
+                        result=json.dumps({'decision':'accepted','reason':'Marked resolved by the reporter.','method':'Reporter confirmation'})
+                        db.execute('INSERT INTO proofs VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(secrets.token_hex(12),issue['id'],u['id'],t,None,None,None,t,'Latest photo',photo,result,1))
+                    db.execute('INSERT INTO events(issue_id,created,actor,action,note) VALUES(?,?,?,?,?)',(issue['id'],t,u['name'],'reporter_closed','Marked resolved by reporter; latest photo optional'))
+            return issue_view(get_issue(issue['id']),True)
         if len(parts)==3 and parts[2]=='proofs' and method=='POST':
             if issue['resolved'] is not None: raise ApiError('This issue is already resolved.',409)
             rate('proof:'+u['id'],20)
@@ -243,6 +326,13 @@ def application(env,start_response):
     try:
         from urllib.parse import parse_qs
         method=env['REQUEST_METHOD']; path=env.get('PATH_INFO',''); body={}
+        if method=='GET' and path in ('/','/index.html','/app.js','/style.css'):
+            name='index.html' if path=='/' else path[1:]
+            asset=Path(__file__).parent.parent/'android/app/src/main/assets'/name
+            if not asset.is_file(): raise ApiError('Web assets are not installed.',404)
+            payload=asset.read_bytes(); mime={'html':'text/html','js':'application/javascript','css':'text/css'}[name.rsplit('.',1)[-1]]
+            start_response('200 OK',[('Content-Type',mime+'; charset=utf-8'),('Content-Length',str(len(payload))),('Cache-Control','no-store'),('X-Content-Type-Options','nosniff')])
+            return [payload]
         length=int(env.get('CONTENT_LENGTH') or 0)
         if length<0 or length>8_000_000: raise ApiError('Upload too large',413)
         if method=='POST':
