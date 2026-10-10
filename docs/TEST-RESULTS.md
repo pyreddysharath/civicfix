@@ -1,21 +1,15 @@
-# Verification — 6 October 2026
+# CivicFix 0.2 validation — 10 October 2026
 
-## Completed
+Passed locally:
+- Python syntax compilation and JavaScript syntax check.
+- 18 existing backend regression cases adapted to email signup and the seven-day ETA.
+- 14 additional backend cases: unverified signup denied, code expiry, five-guess lockout, resending/cooldown, email binding, single-use verification, SMTP failure/missing settings, exact minimum ETA, optional description, reporter-only resolution, resolution with and without photos, invalid photo protection, combined filter behavior, deadline equality and reporter email privacy.
+- 6 frontend logic assertions for amber/red/green boundaries, elapsed time and escaped output.
+- DOM integration test with jsdom: login-first flow, OTP gate, edited-email invalidation, registration, no bottom tabs, two actions, read-only location, one-week ETA default/minimum, image selection, optional description, submission, colour classes, filters, inline details, optional-photo resolution, Raised by navigation, logout/login.
 
-- 18 backend tests passed with a temporary SQLite database and actual encoded images.
-- 7 frontend logic assertions passed: open, overdue, resolved, late resolution, equality at the deadline, elapsed duration and escaping untrusted HTML.
-- JavaScript syntax checked with Node.
-- Python source compiled to bytecode.
-- Android manifest/resource XML parsed successfully.
-
-AI acceptance tests use controlled, mocked provider outputs. A mock is used only in tests, not in the shipped service. Without credentials, the real service explicitly returns unavailable / pending review.
-
-## Not verified here
-
-- Android APK compilation: Android SDK, Gradle and the JDK compiler were not installed. A reproducible GitHub Actions build workflow is supplied, but has not been executed.
-- Camera/GPS permissions and lifecycle on a physical Android device or emulator.
-- Full UI browser rendering and the supplied Playwright regression test: Chromium was not installed and its download failed. No successful screenshot/render test is claimed.
-- Live AI requests or AI accuracy on real civic issues.
-- Hosted TLS, real-device networking, production load or deployment.
-
-Before distributing an APK, run the build workflow and the device acceptance checks in DEVICE-CHECKLIST.md.
+Not completed here:
+- Android compilation is checked by the repository’s Build Android APK workflow. Consult the latest GitHub Actions run for the uploaded source revision; the local checks above do not compile an APK.
+- Real device camera/document-picker permissions, GPS/geocoder results, installation and process recreation.
+- Live SMTP delivery. Backend tests mock delivery, never send real messages, and do not ship a verification bypass.
+- Screenshot-based mobile layout verification. Chromium download failed in this environment. DOM tests do not prove visual layout.
+- Hosted backend deployment or end-to-end testing against a live mail provider.

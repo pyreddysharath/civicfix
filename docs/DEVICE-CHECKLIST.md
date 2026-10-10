@@ -1,18 +1,15 @@
-# Device acceptance checks
+# CivicFix 0.2 device checks
 
-1. Install the debug APK on Android 8 and a current Android version. Check screen insets, keyboard resizing, rotation and system Back.
-2. Connect two phones to the same HTTPS backend. Register different users.
-3. Capture a report, grant precise location, confirm orientation, address and stored GPS accuracy. Publish on phone A; verify it appears on phone B.
-4. Deny location permission. Confirm the photo can be saved as a draft and publication explains that GPS is missing.
-5. Close/restart the app after saving a draft. Verify the photo and typed data remain. Clear app data only after confirming that this intentionally deletes local drafts.
-6. Turn off networking while publishing. The draft must remain available. Retry once connected; only one report should exist for that draft ID.
-7. Search by reporter username, city, state, street and country. Test two areas with the same city name using state/country terms where needed. Search is literal contiguous text, not a full geocoder.
-8. View nearby reports from both sides of a 5 km boundary.
-9. Set a short future deadline. Confirm an unresolved issue becomes red after the deadline, including while the screen stays open.
-10. Submit an identical original as proof. It must not close. Submit an unrelated scene or distant GPS; it must remain open.
-11. With AI configured, submit a real before/after repair pair. Review the recorded explanation. False or uncertain acceptance should be investigated and the issue reopened.
-12. Accept an on-time proof; status and elapsed time should be green. Accept a late proof; status should be green and elapsed time red.
-13. Upload proof from phone B. Confirm contributor attribution and search. Reopening is restricted to the original reporter; trusted operators can review via CLI.
-14. Test landscape, large font accessibility, long addresses, non-Latin names, and a slow network.
-15. Turn AI credentials off. Reports and proof must still save, with an explicit unavailable/pending message and no automatic closure.
-16. Build a signed release APK. Confirm HTTP is rejected and HTTPS works. Keep the signing key outside the source repository.
+1. Build and install the new APK on Android 8.0+; connect to the deployed HTTPS backend using Server connection on the login screen.
+2. Check that login has only email/password/Login/Create an account, with no bottom tabs.
+3. Create an account with a name; send an email OTP. Verify actual delivery, wrong code, expired code, resend cooldown, and password mismatch behavior. Verify an unverified email cannot register.
+4. Log in and check the two side-by-side buttons at narrow portrait width and with large system text.
+5. Open Report an Issue. Test GPS permission allowed and denied, location services off, network unavailable, and a place with no returned street. Location fields must not allow typing.
+6. Select a photo from the system picker and separately capture one. Cancel either flow, then retry. Check portrait/landscape orientation and that selecting a photo retains the title and description.
+7. Submit with no description and default one-week ETA. Confirm no selection below one week exists. Reload My Reported Issues and confirm the stored details.
+8. Check status/country/city/street filters individually and in combination; clear filters. Select a card and confirm its details open below the list. Tap Raised by and confirm only that person's records are shown.
+9. Mark one issue resolved without a photo and another with a latest photo. Both turn green; original photos remain. A different account cannot close another reporter's issue.
+10. Test an issue at its exact ETA boundary using controlled test data: amber before, red at/after, green after resolution even if late. Verify elapsed time stops at closure.
+11. Log out and back in. Verify no previous user's issues remain on the new user's screen. Restart the app and verify session recovery.
+
+A report's GPS is the phone's current location, not the location where an uploaded image was originally taken. Refresh GPS after moving. Signup requires a working backend and mail service; no local/offline account is created.
