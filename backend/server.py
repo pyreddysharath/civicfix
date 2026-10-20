@@ -85,8 +85,8 @@ def email_address(body):
 def send_email_otp(email, code):
     host=os.environ.get('SMTP_HOST'); sender=os.environ.get('SMTP_FROM')
     if not host or not sender: raise ApiError('Email verification is not configured. Please contact the app administrator.',503)
-    message=EmailMessage(); message['From']=sender; message['To']=email; message['Subject']='Your CivicFix verification code'
-    message.set_content(f'Your CivicFix verification code is {code}. It expires in 10 minutes.\n\nIf you did not request this code, ignore this email.')
+    message=EmailMessage(); message['From']=sender; message['To']=email; message['Subject']='Your Nenu Saitham verification code'
+    message.set_content(f'Your Nenu Saitham verification code is {code}. It expires in 10 minutes.\n\nIf you did not request this code, ignore this email.')
     try:
         port=int(os.environ.get('SMTP_PORT','587')); context=ssl.create_default_context()
         connection=smtplib.SMTP_SSL(host,port,timeout=20,context=context) if port==465 else smtplib.SMTP(host,port,timeout=20)
@@ -254,7 +254,7 @@ def dispatch(method,path,query,body,token,ip):
 
     if method=='POST' and path=='/location':
         # Browsers have GPS but no native reverse geocoder. Android uses its built-in Geocoder.
-        raise ApiError('Address detection is available in the Android app. Open CivicFix on Android to report an issue.',503)
+        raise ApiError('Address detection is available in the Android app. Open Nenu Saitham on Android to report an issue.',503)
     if method=='POST' and path=='/analyze':
         rate('ai:'+u['id'],30); photo,_=clean_photo(body.get('photo'))
         return analyze(photo,text(body,'description',3000,False))
