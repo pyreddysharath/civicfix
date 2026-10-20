@@ -1,29 +1,8 @@
-# CivicFix 0.3 — reports, nearby issues and profile
+# CivicFix 0.4
 
-Android 8.0+ community issue reporting. Version code 4, version name 0.3.0.
+Home has a centered title, Report an Issue button and Issues below. Photos reveal preview/crop/GPS only after selection. Description alone is optional. Search offers distance (3 km default) or worldwide text fields; My reported Issues always restricts ownership.
 
-## Screens
-
-- Home opens with one main **Report an Issue** button. The header contains **Issues** and a profile avatar with the first letter of the user's name. No report fields or GPS prompt appear until requested.
-- Reporting order: **Category → Image (Capture / Upload) → Description (optional) → ETA**. The image section includes the GPS summary and current-GPS / map-selection controls. Title is generated from the category. Minimum/default ETA remains 7 days.
-- Categories: Roads & Potholes, Electricity, Street Lighting, Cleaning & Waste, Drainage & Sewage, Water Supply, Construction & Debris, Footpaths & Accessibility, Parks & Public Spaces, Traffic Signs & Signals, Other.
-- Capturing a photo refreshes the current GPS. An uploaded image needs current GPS or a manually selected map point. Coordinates and any available address are saved. A missing reverse-geocoded address does not discard valid coordinates.
-- **Issues** opens **All issues**, initially within **3 km** of the current location. Adjust distance from 0.1 to 200 km, search a city/street/area, or select a map pin anywhere. **My reported Issues** lists all the current user's reports regardless of distance. Clicking Raised by lists that user's reports.
-- Text search and status/country/city/street filters apply to the list and chart. Total = Open + Closed. Open includes overdue reports. The donut pie chart splits open within ETA (amber), overdue (red), and closed (green). Empty results show zero counts, not invented sample data.
-- Issue details preserve original image and entered information, optional latest image, and reporter-only resolution. Closed issues stay green even if resolved late.
-- The profile avatar opens editable name and email. Real account email changes require an OTP to the new email. Other device sessions are revoked after an email change. Demo profile changes stay within the current session.
-
-## Temporary demo login
-
-`DEMO_LOGIN=true` remains enabled as requested. Clicking Login opens an isolated demo without contacting the backend, even with blank fields. Demo reports and profile edits stay in memory and are cleared on logout or app restart. All issues in demo mode means reports created in that session; it is not a live global database.
-
-Real signup remains available when a backend and SMTP sender are configured. Set `DEMO_LOGIN=false` in `android/app/src/main/assets/app.js` and rebuild to restore actual account login. Never remove backend authentication to simulate login.
-
-## Build and install
-
-The GitHub Actions **Build Android APK** workflow builds the Android app. After success, download **CivicFix-debug-apk**, unzip it and install `app-debug.apk`. A source update does not update an already installed APK. Debug signing keys can differ between runners; use consistent release signing before distributing the app.
-
-For a real account, save your backend HTTPS address under **Server connection** on the login page. Deploy the updated backend along with this APK to enable new categories and profile updates. Existing user and issue records are preserved; legacy category inputs remain accepted.
+**Deployment required:** see [release and moderation setup](docs/RELEASE-SETUP.md). Builds now publish only permanently signed APKs when signing secrets are configured. No new rotating debug APK is distributed. Live image submissions require server-side safety screening; demo previews are explicitly unscanned. Video is a proposed next step, not enabled.
 
 ## Backend and email OTP setup
 
@@ -70,7 +49,7 @@ The browser preview supports browser GPS coordinates, manual map selection and i
 
 ```bash
 cd backend
-python -m unittest test_server test_simple_flow -q
+python -m unittest test_server test_simple_flow test_moderation -q
 cd ..
 node tests/logic-test.cjs
 npm install --no-save jsdom@26
