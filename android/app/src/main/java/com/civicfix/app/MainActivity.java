@@ -28,7 +28,7 @@ public class MainActivity extends Activity {
         if(state!=null){captureId=state.getString("captureId"); String f=state.getString("captureFile"); if(f!=null)captureFile=new File(f);captureTime=state.getLong("captureTime");}
         web=new WebView(this); setContentView(web);
         web.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets.consumeSystemWindowInsets();});
-        WebSettings s=web.getSettings(); s.setJavaScriptEnabled(true); s.setDomStorageEnabled(true); s.setAllowFileAccess(false); s.setAllowContentAccess(false); s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        WebSettings s=web.getSettings(); s.setJavaScriptEnabled(true); s.setUserAgentString(s.getUserAgentString()+" CivicFix/0.3.0 (com.civicfix.app)"); s.setDomStorageEnabled(true); s.setAllowFileAccess(false); s.setAllowContentAccess(false); s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         web.setWebChromeClient(new WebChromeClient());
         web.addJavascriptInterface(new Bridge(),"Native");
         web.setWebViewClient(new WebViewClient(){
@@ -36,12 +36,16 @@ public class MainActivity extends Activity {
                 Uri u=request.getUrl();
                 if("https".equals(u.getScheme()) && "app.civicfix.local".equals(u.getHost())){
                     String path=u.getPath(); if("/".equals(path))path="/index.html";
-                    if(!Arrays.asList("/index.html","/app.js","/style.css").contains(path))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));
+                    if(!Arrays.asList("/index.html","/app.js","/style.css","/leaflet.js","/leaflet.css").contains(path))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));
                     try{return new WebResourceResponse(path.endsWith(".js")?"application/javascript":path.endsWith(".css")?"text/css":"text/html","UTF-8",getAssets().open(path.substring(1)));}catch(Exception e){return null;}
                 }
+                // Only map images may load externally. Scripts remain bundled in the app.
+                if("GET".equals(request.getMethod()) && "https".equals(u.getScheme()) && "tile.openstreetmap.org".equals(u.getHost()) && u.getPath().matches("/[0-9]+/[0-9]+/[0-9]+\\.png"))return null;
                 return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));
             }
-            public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest req){return true;}
+            public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest req){
+                Uri u=req.getUrl();if(req.isForMainFrame() && "https".equals(u.getScheme()) && Arrays.asList("www.openstreetmap.org","osmfoundation.org","leafletjs.com").contains(u.getHost()))try{startActivity(new Intent(Intent.ACTION_VIEW,u));}catch(Exception ignored){}return true;
+            }
         });
         web.loadUrl("https://app.civicfix.local/");
     }
@@ -73,6 +77,7 @@ public class MainActivity extends Activity {
                 JSONObject result=new JSONObject(raw);
                 if(status>=300)throw new Exception(result.optString("error","Server returned "+status));
                 if(path.startsWith("/auth/") && result.has("token"))prefs.edit().putString("token",result.getString("token")).putString("user",result.getJSONObject("user").toString()).apply();
+                if(path.equals("/me"))prefs.edit().putString("user",result.toString()).apply();
                 reply(id,result,null);
             }catch(Exception e){reply(id,null,e.getMessage()==null?"Connection failed":e.getMessage());}finally{if(c!=null)c.disconnect();}
         });}
@@ -94,12 +99,37 @@ public class MainActivity extends Activity {
                 startActivityForResult(pick,92);
             }catch(Exception e){captureId=null;reply(id,null,"Photo picker unavailable. Please use the camera.");}
         });}
+        @JavascriptInterface public void geocode(String id,String query){io.execute(()->{
+            try{
+                String search=query.trim();if(search.length()<2||search.length()>200)throw new Exception("Enter a city, street or area (2–200 characters).");
+                if(!Geocoder.isPresent())throw new Exception("Place search unavailable. Select a point on the map instead.");
+                List<Address> addresses=new Geocoder(MainActivity.this,Locale.getDefault()).getFromLocationName(search,5);
+                JSONArray items=new JSONArray();if(addresses!=null)for(Address a:addresses)items.put(addressJson(a));
+                reply(id,new JSONObject().put("items",items),null);
+            }catch(Exception e){reply(id,null,e.getMessage()==null?"Place search unavailable. Try the map.":e.getMessage());}
+        });}
+        @JavascriptInterface public void reverseGeocode(String id,double lat,double lon){io.execute(()->{
+            try{
+                if(!Double.isFinite(lat)||!Double.isFinite(lon)||lat< -90||lat>90||lon< -180||lon>180)throw new Exception("Invalid coordinates");
+                JSONObject j=new JSONObject();j.put("lat",lat);j.put("lon",lon);j.put("accuracy",0);
+                if(Geocoder.isPresent())try{List<Address> a=new Geocoder(MainActivity.this,Locale.getDefault()).getFromLocation(lat,lon,1);if(a!=null&&!a.isEmpty())j=addressJson(a.get(0));}catch(Exception ignored){}
+                // Retain the chosen point, not a geocoder's nearest address centroid.
+                j.put("lat",lat);j.put("lon",lon);reply(id,j,null);
+            }catch(Exception e){reply(id,null,"Could not read selected location");}
+        });}
         @JavascriptInterface public void location(String id){main.post(()->{
             if(locationId!=null){reply(id,null,"Location request already running");return;}
             locationId=id;
             if(checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION},91);}
             else locate();
         });}
+    }
+    JSONObject addressJson(Address x) throws JSONException{
+        JSONObject j=new JSONObject();j.put("lat",x.getLatitude());j.put("lon",x.getLongitude());j.put("accuracy",0);
+        j.put("street",x.getThoroughfare()==null?"":x.getThoroughfare());
+        String city=x.getLocality()!=null?x.getLocality():x.getSubAdminArea();j.put("city",city==null?"":city);
+        j.put("state",x.getAdminArea()==null?"":x.getAdminArea());j.put("country",x.getCountryName()==null?"":x.getCountryName());
+        j.put("label",x.getMaxAddressLineIndex()>=0?x.getAddressLine(0):j.optString("city"));return j;
     }
     void locate(){
         lm=(LocationManager)getSystemService(LOCATION_SERVICE);
