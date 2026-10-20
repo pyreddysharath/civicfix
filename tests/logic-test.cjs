@@ -1,5 +1,5 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
-const source=fs.readFileSync(path.join(__dirname,'../android/app/src/main/assets/app.js'),'utf8').split('(async()=>{if(config.user?.id||webToken)')[0];
+const source=fs.readFileSync(path.join(__dirname,'../android/app/src/main/assets/app.js'),'utf8').split('(async()=>{if(!DEMO_LOGIN')[0];
 const context=vm.createContext({window:{},location:{origin:'http://localhost'},document:{addEventListener(){}},sessionStorage:{getItem(){return null}},setInterval(){},setTimeout(){},clearTimeout(){},console,Date,URLSearchParams,crypto:require('node:crypto').webcrypto});
 vm.runInContext(source,context);
 for(const [expression,expected] of [

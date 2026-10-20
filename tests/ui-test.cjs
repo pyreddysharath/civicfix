@@ -1,55 +1,68 @@
-// DOM integration checks. Uses a simulated Android bridge; no emails or reports are sent.
+// DOM integration with the real bundled Leaflet library and a simulated Android bridge.
+// No mail, GPS, map tile requests or backend requests leave this test process.
 const {JSDOM}=require('jsdom');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const source=fs.readFileSync(path.join(__dirname,'../android/app/src/main/assets/app.js'),'utf8');
+const leaflet=fs.readFileSync(path.join(__dirname,'../android/app/src/main/assets/leaflet.js'),'utf8');
 const photo='data:image/jpeg;base64,fixture';
-const t=Date.now()/1000;
-const base={user_id:'user1',reporter:'Sharath',title:'Broken pavement',description:'',country:'India',state:'Telangana',city:'Hyderabad',street:'Main Street',lat:17.4,lon:78.3,created:t-1000,deadline:t+604800,resolved:null,thumbnail:photo,photo,proofs:[]};
-let items=[{...base,id:'one'},{...base,id:'two',title:'Blocked drain',deadline:t-1,country:'UK',city:'London',street:'High Street'},{...base,id:'three',title:'Streetlight repaired',resolved:t-20}];
-const requests=[];let loggedIn=false,failLocation=false;
-const dom=new JSDOM('<div id="app"></div><div id="toast" hidden></div>',{url:'https://app.civicfix.local/',runScripts:'outside-only',pretendToBeVisual:true});
-const w=dom.window;
-w.HTMLElement.prototype.scrollIntoView=function(){};
-w.Native={config:()=>JSON.stringify({server:'https://test.invalid',user:{}}),logout(){loggedIn=false},setServer(){},
- request(id,method,url,json){setTimeout(()=>{
-  const b=JSON.parse(json);requests.push({method,url,body:b});let result,error;
-  if(url==='/auth/send-otp')result={message:'Verification code sent.',resend_after:60};
-  else if(url==='/auth/verify-otp')result={verification_token:'verified-token'};
-  else if(url==='/auth/register'||url==='/auth/login'){loggedIn=true;result={token:'session',user:{id:'user1',name:'Sharath',username:'sharath@example.com'}};}
-  else if(url==='/auth/logout')result={ok:true};
-  else if(url.startsWith('/issues?'))result={items:items,total:items.length,next_offset:null};
-  else if(url==='/issues'&&method==='POST'){assert.equal(b.eta_days,7);assert.equal(b.description,'');result={...base,id:'new',title:b.title};items.unshift(result);}
-  else if(url.endsWith('/resolve')){const i=items.find(i=>url.includes(i.id));i.resolved=Date.now()/1000;result={...i};}
-  else if(url.startsWith('/issues/'))result={...items.find(i=>url.endsWith(i.id))};
-  else error='Unexpected '+url;
-  w.nativeReply(id,result,error);
- },0);},
- location(id){setTimeout(()=>w.nativeReply(id,failLocation?null:{lat:17.4,lon:78.3,accuracy:10,country:'India',state:'Telangana',city:'Hyderabad',street:'Main Street'},failLocation?'Location permission denied':null),0);},
- choosePhoto(id){setTimeout(()=>w.nativeReply(id,{photo},null),0)},capture(id){this.choosePhoto(id)}};
-w.eval(source);
-const $=s=>w.document.querySelector(s);
-const pause=()=>new Promise(r=>setTimeout(r,15));
-const click=async selector=>{$(selector).click();await pause()};
-const submit=async selector=>{$(selector).dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await pause()};
-const fill=(selector,value)=>{$(selector).value=value;$(selector).dispatchEvent(new w.Event('input',{bubbles:true}));};
+const pause=()=>new Promise(r=>setTimeout(r,20));
+function setup(demo=true){
+ const dom=new JSDOM('<div id="app"></div><div id="toast" hidden></div>',{url:'https://app.civicfix.local/',runScripts:'outside-only',pretendToBeVisual:true});
+ const w=dom.window;let gpsCalls=0,failLocation=false,hold=false;const requests=[];
+ w.HTMLElement.prototype.scrollIntoView=function(){};w.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
+ w.Native={config:()=>JSON.stringify({server:'https://test.invalid',user:{}}),logout(){},setServer(){},
+ request(id,method,url,json){requests.push({method,url,body:JSON.parse(json)});setTimeout(()=>{
+  let r;if(url==='/auth/send-otp')r={message:'Verification code sent.',resend_after:60};
+  else if(url==='/auth/verify-otp')r={verification_token:'verified-token'};
+  else if(url==='/auth/register'||url==='/auth/login')r={user:{id:'user1',name:'Sharath',username:'sharath@example.com'},token:'session'};
+  else if(url==='/me')r={id:'user1',name:JSON.parse(json).name,username:JSON.parse(json).email||'sharath@example.com'};
+  else if(url.startsWith('/issues?'))r={items:[],next_offset:null};else r={};w.nativeReply(id,r,null);
+ },0)},
+ location(id){gpsCalls++;setTimeout(()=>w.nativeReply(id,failLocation?null:{lat:17.4,lon:78.3,accuracy:10,country:'India',state:'Telangana',city:'Hyderabad',street:'Main Street'},failLocation?'GPS denied':null),hold?100:0)},
+ choosePhoto(id){setTimeout(()=>w.nativeReply(id,{photo},null),0)},capture(id){this.choosePhoto(id)},
+ geocode(id,query){setTimeout(()=>w.nativeReply(id,{items:query==='London'?[{lat:51.5,lon:-.12,city:'London',country:'UK',label:'London, UK'}]:[]},null),0)},
+ reverseGeocode(id,lat,lon){setTimeout(()=>w.nativeReply(id,{lat,lon,accuracy:0,city:'Chosen city',country:'India'},null),0)}};
+ w.eval(leaflet);w.eval((demo?source:source.replace('const DEMO_LOGIN=true','const DEMO_LOGIN=false'))+`\nwindow.testState={seed(){demoIssues=[{...demoIssues[0],id:'near',resolved:null,lat:17.4,lon:78.3},{...demoIssues[0],id:'far',resolved:null,lat:17.44,lon:78.3},{...demoIssues[0],id:'late',resolved:null,deadline:Date.now()/1000-1,lat:17.4,lon:78.3},{...demoIssues[0],id:'closed',lat:17.4,lon:78.3}];},point(lat,lng){picker.map.fire('click',{latlng:{lat,lng}});}};`);
+ const $=s=>w.document.querySelector(s);
+ const click=async s=>{assert($(s),'Missing '+s);$(s).click();await pause();};
+ const fill=(s,v)=>{$(s).value=v;$(s).dispatchEvent(new w.Event('input',{bubbles:true}));};
+ const submit=async s=>{$(s).dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));await pause();};
+ return {dom,w,$,click,fill,submit,requests,gps:()=>gpsCalls,deny:v=>failLocation=v,hold:v=>hold=v};
+}
 (async()=>{
- assert.equal($('#auth-submit').textContent,'Login');assert.equal(w.document.querySelectorAll('nav').length,0);
- await click('[data-action="switch-auth"]');fill('#email','sharath@example.com');fill('#password','secure-password');fill('#confirm-password','secure-password');fill('#name','Sharath');
- await submit('#auth-form');assert.match($('#auth-error').textContent,/Verify your email/);assert.equal(loggedIn,false);
- await click('#send-code');assert.equal($('#otp-section').hidden,false);fill('#otp','123456');await click('#verify-code');assert.match($('#email-status').textContent,/verified/);
- fill('#email','changed@example.com');assert.equal($('#email-status').textContent,'');await submit('#auth-form');assert.match($('#auth-error').textContent,/Verify/);
- fill('#email','sharath@example.com');await click('#send-code');fill('#otp','123456');await click('#verify-code');await submit('#auth-form');
- assert.equal(w.document.querySelectorAll('.actions button').length,2);assert.equal($('#eta').value,'7');assert.equal($('#country').readOnly,true);assert.equal($('#city').value,'Hyderabad');
- assert([...$('#eta').options].every(o=>Number(o.value)>=7));
- fill('#title','Pothole outside library');await submit('#report-form');assert.match($('#report-error').textContent,/Upload/);await click('[data-action="upload"]');await submit('#report-form');
- assert.equal($('.issue-card.open')!==null,true);assert.equal($('.issue-card.overdue')!==null,true);assert.equal($('.issue-card.resolved')!==null,true);
- $('#filter-status').value='overdue';$('#filter-status').dispatchEvent(new w.Event('change'));assert.equal(w.document.querySelectorAll('.issue-card').length,1);
- await click('[data-action="clear-filters"]');$('#filter-country').value='UK';$('#filter-country').dispatchEvent(new w.Event('change'));assert.equal(w.document.querySelectorAll('.issue-card').length,1);
- await click('[data-action="detail"]');assert.match($('#issue-detail').textContent,/Blocked drain/);assert.equal($('#resolve-submit').textContent,'Mark as resolved');
- await submit('#resolve-form');assert.equal($('#detail-status .resolved')!==null,true);assert.equal($('#resolve-form'),null);
- await click('#issue-detail [data-action="reporter"]');assert.match($('.list-panel h2').textContent,/Issues raised by Sharath/);assert(requests.some(r=>r.url.includes('reporter_id=user1')));
- await click('[data-action="logout"]');assert.equal($('#auth-submit').textContent,'Login');fill('#email','sharath@example.com');fill('#password','secure-password');await submit('#auth-form');assert($('.actions'));
- assert.equal(w.document.querySelectorAll('nav').length,0);
- console.log('PASS: login, OTP gate and changed-email invalidation, registration, two actions/no tabs, read-only GPS, minimum ETA, optional description, photo upload, report submission, three colours, filters, inline detail, optional-photo resolution, reporter navigation, logout and login.');
- dom.window.close();
-})().catch(e=>{console.error(e);dom.window.close();process.exit(1)});
+ let t=setup();const {w,$,click,fill,submit}=t;
+ try{
+  await click('#auth-submit');assert($('.report-entry'));assert(!$('#report-form'));assert.equal(t.gps(),0);assert.equal($('.avatar').textContent,'D');
+  await click('[data-action="report"]');assert($('#report-form'));assert(!$('#title'));
+  assert.deepEqual([...$('#report-form').querySelectorAll('select,textarea')].map(x=>x.id),['category','description','eta']);assert.equal($('#eta').value,'7');
+  fill('#category','Roads & Potholes');await click('[data-action="camera"]');await pause();assert.equal(t.gps(),1);assert.match($('#coordinates').textContent,/17.40000/);
+  await submit('#report-form');assert.equal($('.stat.total strong').textContent,'1');assert.equal($('.stat.open strong').textContent,'1');assert.equal(t.requests.length,0);
+  await click('[data-action="detail"]');assert.match($('#issue-detail').textContent,/Roads & Potholes/);await submit('#resolve-form');assert.equal($('.stat.closed strong').textContent,'1');
+  await click('[data-action="home"]');await click('[data-action="profile"]');fill('#profile-name','Sharath');fill('#profile-email','demo@example.com');await submit('#profile-form');assert.equal($('.avatar').textContent,'S');
+  // Seed issues in both sides of the 3km boundary; all remain isolated to demo memory.
+  w.testState.seed();
+  await click('[data-action="issues"]');await pause();assert.equal($('#radius').value,'3');assert.equal($('.stat.total strong').textContent,'3');assert.equal($('.stat.open strong').textContent,'2');assert.equal($('.stat.closed strong').textContent,'1');assert.match($('.pie-chart').getAttribute('aria-label'),/1 overdue/);
+  fill('#radius','5');$('#radius').dispatchEvent(new w.Event('change'));await pause();assert.equal($('.stat.total strong').textContent,'4');
+  fill('#radius','0');$('#radius').dispatchEvent(new w.Event('change'));assert.equal($('#radius').value,'5');
+  fill('#issue-query','not found');assert.equal($('.stat.total strong').textContent,'0');assert.match($('.chart-legend').textContent,/No issues to chart/);await click('[data-action="clear-filters"]');
+  await click('[data-action="pick-search"]');assert($('#picker-map'));w.testState.point(0,0);await click('#use-map');assert(!w.document.querySelector('dialog'));assert.equal($('.stat.total strong').textContent,'0');
+  fill('#area-query','London');await submit('#area-search');await click('.place-result');assert.match($('#area-status').textContent,/London/);
+  await click('[data-action="scope-mine"]');assert(!$('#radius'));assert.equal($('.stat.total strong').textContent,'4');
+  await click('[data-action="home"]');await click('[data-action="report"]');fill('#category','Electricity');await click('[data-action="upload"]');t.deny(true);await click('#refresh-location');assert.match($('#location-status').textContent,/GPS denied/);
+  await click('[data-action="pick-report"]');w.testState.point(0,0);await click('#use-map');assert.match($('#coordinates').textContent,/Selected point: 0.00000, 0.00000/);
+  await submit('#report-form');assert.equal($('.stat.total strong').textContent,'5');
+  // A late GPS response must not override a manually chosen point.
+  await click('[data-action="home"]');await click('[data-action="report"]');t.deny(false);t.hold(true);await click('#refresh-location');await click('[data-action="pick-report"]');w.testState.point(1,2);await click('#use-map');await new Promise(r=>setTimeout(r,120));assert.match($('#coordinates').textContent,/1.00000, 2.00000/);
+  await click('[data-action="profile"]');await click('[data-action="logout"]');await click('#auth-submit');await click('[data-action="issues"]');await click('[data-action="scope-mine"]');assert.equal($('.stat.total strong').textContent,'0');assert.equal(t.requests.length,0);
+ }finally{t.dom.window.close();}
+ t=setup(false);
+ try{
+  const {$,click,fill,submit,requests}=t;
+  await click('[data-action="switch-auth"]');fill('#email','sharath@example.com');fill('#password','secure-password');fill('#confirm-password','secure-password');fill('#name','Sharath');
+  await submit('#auth-form');assert.match($('#auth-error').textContent,/Verify your email/);await click('#send-code');fill('#otp','123456');await click('#verify-code');await submit('#auth-form');assert($('.report-entry'));assert(!$('#report-form'));
+  await click('[data-action="profile"]');fill('#profile-email','new@example.com');await submit('#profile-form');assert.match($('#profile-error').textContent,/Verify the new email/);
+  await click('#profile-send');fill('#profile-otp','123456');await click('#profile-verify');fill('#profile-email','other@example.com');await submit('#profile-form');assert.match($('#profile-error').textContent,/Verify/);
+  fill('#profile-email','sharath@example.com');fill('#profile-name','Updated name');await submit('#profile-form');assert.equal($('.avatar').textContent,'U');assert(requests.some(r=>r.url==='/me'&&r.body.name==='Updated name'));
+ }finally{t.dom.window.close();}
+ console.log('PASS: home, report field order, capture GPS, maps/pin/zero coordinates, GPS failure and race, 3km/5km radius, empty and populated chart totals, filters, search places, resolution, profile, OTP email-change gate, demo isolation and logout.');
+})().catch(e=>{console.error(e);process.exitCode=1;});
