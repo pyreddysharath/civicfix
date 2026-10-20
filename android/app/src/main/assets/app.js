@@ -9,7 +9,7 @@ let currentUser=null, mode='login', active='home', report=null, selected=null, i
 let verifiedEmail='',verificationToken='',otpEmail='',resendAt=0,authBusy=false,reportBusy=false,resolveBusy=false;
 const categories=['Roads & Potholes','Electricity','Street Lighting','Cleaning & Waste','Drainage & Sewage','Water Supply','Construction & Debris','Footpaths & Accessibility','Parks & Public Spaces','Traffic Signs & Signals','Other'];
 let issueScope='all',searchCenter=null,searchRadius=3,searchText='',locationPromise=null,locationVersion=0,screenVersion=0;
-let picker=null;
+let picker=null,cropDialog=null,searchMode='distance',fieldQuery='';
 let filters={status:'',country:'',city:'',street:''};
 let webToken=sessionStorage.getItem('civicfix-session')||'';
 window.nativeReply=(id,result,error)=>{const p=pending.get(id);if(!p)return;clearTimeout(p.timer);pending.delete(id);error?p.reject(Error(error)):p.resolve(result);};
@@ -23,6 +23,7 @@ async function api(method,path,body={}){
   if(method==='GET'&&path.startsWith('/issues?')){
    const q=new URLSearchParams(path.split('?')[1]);let items=demoIssues.filter(i=>(q.get('mine')!=='1'||i.user_id===currentUser.id)&&(!q.get('reporter_id')||i.user_id===q.get('reporter_id')));
    if(q.has('lat')){const lat=Number(q.get('lat')),lon=Number(q.get('lon')),radius=Number(q.get('radius'));items=items.filter(i=>kmBetween(lat,lon,i.lat,i.lon)<=radius).sort((a,b)=>kmBetween(lat,lon,a.lat,a.lon)-kmBetween(lat,lon,b.lat,b.lon));}
+   if(q.get('q'))items=items.filter(i=>[i.title,i.category,i.description,i.reporter,i.country,i.state,i.city,i.street].join(' ').toLowerCase().includes(q.get('q').toLowerCase()));
    const offset=Number(q.get('offset')||0),limit=Number(q.get('limit')||50);return {items:items.slice(offset,offset+limit),total:items.length,next_offset:offset+limit<items.length?offset+limit:null};
   }
   if(method==='POST'&&path==='/issues'){
@@ -52,8 +53,8 @@ function badge(i){const s=status(i);return `<span class="badge ${s}"><i></i>${la
 function stamp(t){return new Date(t*1000).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'});}
 function elapsed(i){const seconds=Math.max(0,(i.resolved??Date.now()/1000)-i.created);const days=Math.floor(seconds/86400),hours=Math.floor(seconds%86400/3600);return days?`${days}d ${hours}h`:hours?`${hours}h ${Math.floor(seconds%3600/60)}m`:`${Math.floor(seconds/60)}m`;}
 function initial(){return Array.from((currentUser?.name||'User').trim())[0]?.toUpperCase()||'U';}
-function header(){return `<header><a class="brand" href="#" data-action="home"><span class="brand-icon">✓</span>CivicFix</a>${currentUser?`<div class="header-actions"><button class="text-button" data-action="issues" aria-pressed="${active==='issues'}">Issues</button><button class="avatar" data-action="profile" aria-label="Edit profile for ${esc(currentUser.name)}">${esc(initial())}</button></div>`:''}</header>`;}
-function shell(html){closePicker();screenVersion++;$('#app').innerHTML=header()+`<main>${html}</main>`;}
+function header(){return `<header><a class="brand" href="#" data-action="home"><span class="brand-icon">✓</span>CivicFix</a>${currentUser?`<div class="header-actions"><button class="avatar" data-action="profile" aria-label="Edit profile for ${esc(currentUser.name)}">${esc(initial())}</button></div>`:''}</header>`;}
+function shell(html){closeCrop();closePicker();screenVersion++;$('#app').innerHTML=header()+`<main>${html}</main>`;}
 function authPage(){
  currentUser=null;report=null;selected=null;issues=[];listVersion++;
  shell(`<section class="panel auth"><h1>${mode==='register'?'Create an account':'Welcome back'}</h1><p class="subtle">${mode==='register'?'Verify your email to get started.':'Log in to report and track local issues.'}</p>
@@ -98,7 +99,7 @@ async function submitAuth(event){
  catch(e){$('#auth-error').textContent=e.message;}finally{authBusy=false;if($('#auth-form'))setAuthBusy(false);}
 }
 function landing(){
- shell(`<div class="welcome"><h1>Hello, ${esc(currentUser.name)}</h1><p class="subtle">A better neighbourhood starts with you.</p></div><button data-action="report" class="primary full report-entry">Report an Issue</button><div id="content"></div>${demoSession?'<p class="hint demo-note">Demo mode · Reports stay in this session and are cleared on logout or app restart.</p>':''}`);
+ shell(`<button data-action="report" class="primary full report-entry">Report an Issue</button><button data-action="issues" class="text-button full issues-entry">Issues</button><div id="content"></div>`);
  if(active==='report')renderReport();
 }
 function saveReportFields(){if($('#report-form')&&report){report.category=$('#category').value;report.description=$('#description').value;report.eta_days=$('#eta').value;}}
@@ -106,13 +107,25 @@ function renderReport(){
  if(!report)report={request_id:crypto.randomUUID(),category:'',description:'',eta_days:7,photo:'',location:null};
  $('#content').innerHTML=`<section class="panel"><h2>Report an Issue</h2><form id="report-form">
  <label>Category<select id="category" required><option value="">Select a category</option>${categories.map(c=>`<option ${report.category===c?'selected':''}>${esc(c)}</option>`).join('')}</select></label>
- <label>Image <span class="required">*</span></label><div class="photo-box" id="report-photo">${report.photo?`<img src="${esc(report.photo)}" alt="Selected issue image">`:'<span>Add a photo of the issue</span>'}</div>
- <div class="photo-actions">${window.Native?'<button type="button" class="secondary" data-action="camera">Capture</button>':''}<button type="button" class="secondary" data-action="upload">Upload</button><input type="file" id="image-input" accept="image/jpeg,image/png,image/webp" hidden></div>
- <div class="location-summary"><p id="location-status" class="hint" role="status"></p><p id="coordinates" class="hint"></p><div class="photo-actions"><button type="button" class="text-button" id="refresh-location">Use current GPS</button><button type="button" class="text-button" data-action="pick-report">Select GPS on map</button></div></div>
+ <label>Image</label><div class="photo-actions"><button type="button" class="secondary" data-action="camera">Capture</button><button type="button" class="secondary" data-action="upload">Upload</button><input type="file" id="image-input" accept="image/jpeg,image/png,image/webp" hidden><input type="file" id="camera-input" accept="image/*" capture="environment" hidden></div>
+ ${report.photo?`<div class="photo-box" id="report-photo"><img src="${esc(report.photo)}" alt="Selected issue image"></div><button type="button" class="secondary" data-action="crop">Crop image</button><div class="location-summary"><h3>GPS location</h3><p id="location-status" class="hint" role="status"></p><p id="coordinates" class="hint"></p><div class="photo-actions"><button type="button" class="text-button" id="refresh-location">Use current GPS</button><button type="button" class="text-button" data-action="pick-report">Select GPS on map</button></div></div>`:''}
  <label>Description <span class="optional">(optional)</span><textarea id="description" maxlength="3000" rows="3" placeholder="Add any useful details">${esc(report.description)}</textarea></label>
- <label>ETA<select id="eta">${[7,14,21,28,60,90].map(d=>`<option value="${d}" ${Number(report.eta_days)===d?'selected':''}>${d%7===0?d/7+' week'+(d===7?'':'s'):d+' days'}${d===7?' (minimum)':''}</option>`).join('')}</select></label><p class="hint">At least one week from submission.</p>
- <p id="report-error" class="error" role="alert"></p><button class="primary full" type="submit" id="submit-report">Submit issue</button></form></section>`;
- $('#report-form').onsubmit=submitReport;$('#refresh-location').onclick=()=>detectLocation();$('#image-input').onchange=e=>pickWebImage(e.target.files[0],false);showLocation();
+ <label>ETA<select id="eta" required>${[7,14,21,28,60,90].map(d=>`<option value="${d}" ${Number(report.eta_days)===d?'selected':''}>${d%7===0?d/7+' week'+(d===7?'':'s'):d+' days'}${d===7?' (minimum)':''}</option>`).join('')}</select></label><p class="hint">At least one week from submission.</p>
+ <p class="hint">${demoSession?'Demo: photos are not scanned or uploaded and last only for this session.':'Photos are sent to our safety screening provider before they are saved.'}</p><p id="report-error" class="error" role="alert"></p><button class="primary full" type="submit" id="submit-report">Submit issue</button></form></section>`;
+ $('#report-form').onsubmit=submitReport;if($('#refresh-location'))$('#refresh-location').onclick=()=>detectLocation();$('#image-input').onchange=e=>pickWebImage(e.target.files[0],false);$('#camera-input').onchange=e=>pickWebImage(e.target.files[0],false,true);showLocation();
+}
+function closeCrop(){if(cropDialog){cropDialog.remove();cropDialog=null;}}
+async function openCrop(){
+ saveReportFields();const target=report,source=report?.photo;if(!source)return;
+ const image=new Image();image.src=source;try{await image.decode();}catch{toast('Cannot open this image for cropping.');return;}
+ if(report!==target||active!=='report')return;
+ closeCrop();const dialog=cropDialog=document.createElement('dialog');dialog.className='map-dialog';
+ dialog.innerHTML='<h2>Crop image</h2><canvas id="crop-preview" aria-label="Crop preview"></canvas><label>Keep image size (%)<input id="crop-size" type="range" min="10" max="100" value="100"></label><label>Horizontal position<input id="crop-x" type="range" min="0" max="100" value="50"></label><label>Vertical position<input id="crop-y" type="range" min="0" max="100" value="50"></label><div class="photo-actions"><button id="crop-save" class="primary">Apply crop</button><button id="crop-cancel" class="secondary">Cancel</button></div>';
+ document.body.append(dialog);dialog.showModal();dialog.oncancel=closeCrop;
+ const canvas=$('#crop-preview');let rect;
+ const draw=()=>{const ratio=Math.max(160/Math.min(image.width,image.height),Number($('#crop-size').value)/100);const width=Math.round(image.width*ratio),height=Math.round(image.height*ratio);rect=[Math.round((image.width-width)*Number($('#crop-x').value)/100),Math.round((image.height-height)*Number($('#crop-y').value)/100),width,height];canvas.width=width;canvas.height=height;canvas.getContext('2d').drawImage(image,...rect,0,0,width,height);};
+ for(const id of ['crop-size','crop-x','crop-y'])$('#'+id).oninput=draw;
+ $('#crop-cancel').onclick=closeCrop;$('#crop-save').onclick=()=>{if(report===target){report.photo=canvas.toDataURL('image/jpeg',.9);closeCrop();renderReport();}};draw();
 }
 function validLocation(l){return l&&Number.isFinite(l.lat)&&Number.isFinite(l.lon)&&Math.abs(l.lat)<=90&&Math.abs(l.lon)<=180;}
 function locationName(l){return l?.label||[l?.street,l?.city,l?.state,l?.country].filter(Boolean).join(', ')||(validLocation(l)?`${l.lat.toFixed(5)}, ${l.lon.toFixed(5)}`:'No location selected');}
@@ -172,10 +185,10 @@ function openPicker(purpose){
 function renderPlaceResults(node,places,select){node.innerHTML='';for(const place of places){const b=document.createElement('button');b.type='button';b.className='place-result';b.textContent=locationName(place);b.onclick=()=>{select(place);node.innerHTML='';};node.append(b);}}
 async function selectNativePhoto(camera=false,proof=false){
  const target=proof?selected:report;
- try{const result=await nativeCall(camera?'capture':'choosePhoto');if(proof){if(target===selected){selected.latestPhoto=result.photo;showLatestPhoto();}}else if(target===report){report.photo=result.photo;if($('#report-photo'))$('#report-photo').innerHTML=`<img src="${esc(result.photo)}" alt="Selected issue image">`;if(camera)await detectLocation();}}
+ try{const result=await nativeCall(camera?'capture':'choosePhoto');if(proof){if(target===selected){selected.latestPhoto=result.photo;showLatestPhoto();}}else if(target===report){report.photo=result.photo;renderReport();if(camera)await detectLocation();}}
  catch(e){toast(e.message);}
 }
-async function pickWebImage(file,proof){
+async function pickWebImage(file,proof,camera=false){
  if(!file)return;const target=proof?selected:report;
  try{
   if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>10*1024*1024)throw Error('Choose a JPEG, PNG or WebP image under 10 MB.');
@@ -183,7 +196,7 @@ async function pickWebImage(file,proof){
   const im=await new Promise((res,rej)=>{const image=new Image();image.onload=()=>res(image);image.onerror=()=>rej(Error('Cannot open image.'));image.src=raw;});
   if(Math.min(im.width,im.height)<160)throw Error('Choose an image at least 160 pixels wide and high.');
   const scale=Math.min(1,1600/Math.max(im.width,im.height)),canvas=document.createElement('canvas');canvas.width=Math.round(im.width*scale);canvas.height=Math.round(im.height*scale);canvas.getContext('2d').drawImage(im,0,0,canvas.width,canvas.height);const photo=canvas.toDataURL('image/jpeg',.85);
-  if(proof){if(target===selected){selected.latestPhoto=photo;showLatestPhoto();}}else if(target===report){report.photo=photo;$('#report-photo').innerHTML=`<img src="${esc(photo)}" alt="Selected issue image">`;}
+  if(proof){if(target===selected){selected.latestPhoto=photo;showLatestPhoto();}}else if(target===report){saveReportFields();report.photo=photo;renderReport();if(camera)await detectLocation();}
  }catch(e){toast(e.message);}
 }
 async function submitReport(event){
@@ -197,15 +210,17 @@ async function submitReport(event){
  catch(e){if($('#report-error'))$('#report-error').textContent=e.message;}finally{reportBusy=false;if($('#submit-report')){$('#submit-report').disabled=false;$('#submit-report').textContent='Submit issue';}}
 }
 function renderIssuesPage(autoLocate=true){
- active='issues';shell(`<div class="section-heading"><h1>Issues</h1><button class="text-button" data-action="home">Home</button></div><div class="scope-buttons"><button data-action="scope-mine" class="${issueScope==='mine'?'primary':'secondary'}" aria-pressed="${issueScope==='mine'}">My reported Issues</button><button data-action="scope-all" class="${issueScope==='all'?'primary':'secondary'}" aria-pressed="${issueScope==='all'}">All issues</button></div>
- ${issueScope==='all'?`<section class="panel search-panel"><form id="area-search"><label>Search city, street or area<input id="area-query" maxlength="200" placeholder="Enter a place or latitude, longitude"></label><button type="submit" class="secondary">Search</button></form><div id="area-results"></div><div class="photo-actions"><button class="text-button" id="near-me">Current location</button><button class="text-button" data-action="pick-search">Select on map</button></div><p id="area-status" class="hint" role="status">${searchCenter?esc(locationName(searchCenter)):'Finding your current location…'}</p><label>Distance (km)<input id="radius" type="number" min="0.1" max="200" step="0.1" value="${searchRadius}" inputmode="decimal"></label><p class="hint">Issues within this radius of the selected location. Default: 3 km.</p></section>`:''}<div id="content"></div>${demoSession?'<p class="hint demo-note">Demo mode · Only reports created in this session are available.</p>':''}`);
+ active='issues';shell(`<div class="section-heading"><h1>Issues</h1><button class="text-button" data-action="home">Home</button></div><div class="scope-buttons"><button data-action="scope-mine" class="${issueScope==='mine'?'primary':'secondary'}" aria-pressed="${issueScope==='mine'}">My reported Issues</button><button data-action="scope-all" class="${issueScope==='all'?'primary':'secondary'}" aria-pressed="${issueScope==='all'}">Search</button></div>
+ ${issueScope==='all'?`<section class="panel search-panel"><label>Search by<select id="search-mode"><option value="distance" ${searchMode==='distance'?'selected':''}>Distance</option><option value="fields" ${searchMode==='fields'?'selected':''}>Search fields</option></select></label><form id="field-search" ${searchMode==='fields'?'':'hidden'}><label>Person, country, state, city or street<input id="field-query" maxlength="200" value="${esc(fieldQuery)}" placeholder="Search anywhere"></label><button type="submit" class="secondary">Search</button></form><div ${searchMode==='distance'?'':'hidden'}><form id="area-search"><label>Search city, street or area<input id="area-query" maxlength="200" placeholder="Enter a place or latitude, longitude"></label><button type="submit" class="secondary">Search</button></form><div id="area-results"></div><div class="photo-actions"><button class="text-button" id="near-me">Current location</button><button class="text-button" data-action="pick-search">Select on map</button></div><p id="area-status" class="hint" role="status">${searchCenter?esc(locationName(searchCenter)):'Finding your current location…'}</p><label>Distance (km)<input id="radius" type="number" min="0.1" max="200" step="0.1" value="${searchRadius}" inputmode="decimal"></label><p class="hint">Issues within this radius of the selected location. Default: 3 km.</p></div></section>`:''}<div id="content"></div>${demoSession?'<p class="hint demo-note">Demo mode · Only reports created in this session are available.</p>':''}`);
  const version=screenVersion;let areaVersion=0;
  if(issueScope==='all'){
+  $('#search-mode').onchange=e=>{searchMode=e.target.value;renderIssuesPage();};
+  $('#field-search').onsubmit=e=>{e.preventDefault();fieldQuery=$('#field-query').value.trim();loadIssues();};
   $('#radius').onchange=e=>{const value=Number(e.target.value);if(!Number.isFinite(value)||value<.1||value>200){toast('Choose a distance between 0.1 and 200 km.');e.target.value=searchRadius;return;}searchRadius=value;loadIssues();};
   $('#near-me').onclick=locateIssues;
   $('#area-search').onsubmit=async e=>{e.preventDefault();const query=$('#area-query').value,request=++areaVersion;$('#area-status').textContent='Searching…';try{const places=await searchPlaces(query);if(screenVersion!==version||request!==areaVersion)return;renderPlaceResults($('#area-results'),places,l=>{searchCenter={...l,source:'map'};$('#area-status').textContent=locationName(l);loadIssues();});$('#area-status').textContent=places.length?'Choose a place below.':'No places found. Try the map.';}catch(e){if(screenVersion===version&&request===areaVersion)$('#area-status').textContent=e.message;}};
  }
- if(issueScope==='all'&&!searchCenter){$('#content').innerHTML='<section class="panel"><p class="empty">Choose a location to see nearby issues.</p></section>';if(autoLocate)locateIssues();}
+ if(issueScope==='all'&&searchMode==='distance'&&!searchCenter){$('#content').innerHTML='<section class="panel"><p class="empty">Choose a location to see nearby issues.</p></section>';if(autoLocate)locateIssues();}
  else loadIssues();
 }
 async function locateIssues(){
@@ -216,12 +231,12 @@ async function locateIssues(){
 }
 async function loadIssues(){
  const version=++listVersion,screen=screenVersion;selected=null;issues=[];
- if(issueScope==='all'&&!validLocation(searchCenter))return;
+ if(issueScope==='all'&&searchMode==='distance'&&!validLocation(searchCenter))return;
  $('#content').innerHTML='<section class="panel"><p role="status">Loading issues…</p></section>';
  try{
-  const query=reporter?{reporter_id:reporter.id}:issueScope==='mine'?{mine:'1'}:{lat:String(searchCenter.lat),lon:String(searchCenter.lon),radius:String(searchRadius)};
+  const query=issueScope==='mine'?{mine:'1'}:reporter?{reporter_id:reporter.id}:searchMode==='fields'?{q:fieldQuery}:{lat:String(searchCenter.lat),lon:String(searchCenter.lon),radius:String(searchRadius)};
   let offset=0,all=[];do{const params=new URLSearchParams({limit:'50',offset:String(offset),...query});const data=await api('GET','/issues?'+params);if(version!==listVersion||active!=='issues'||screen!==screenVersion)return;all.push(...data.items);offset=data.next_offset;}while(offset!==null&&offset!==undefined);
-  issues=all;renderList();
+  issues=issueScope==='mine'?all.filter(i=>i.user_id===currentUser.id):all;renderList();
  }catch(e){if(version===listVersion&&active==='issues'&&screen===screenVersion)$('#content').innerHTML=`<section class="panel"><p class="error" role="alert">${esc(e.message)}</p><button class="secondary" data-action="retry-list">Retry</button></section>`;}
 }
 function options(field){return [...new Set(issues.map(i=>i[field]).filter(Boolean))].sort((a,b)=>a.localeCompare(b));}
@@ -234,7 +249,7 @@ function renderCards(){
  if(!$('#issues-list'))return;const shown=issues.filter(i=>(!filters.status||(filters.status==='unresolved'?i.resolved==null:status(i)===filters.status))&&(!searchText||[i.title,i.category,i.description,i.reporter,i.country,i.state,i.city,i.street].join(' ').toLowerCase().includes(searchText.toLowerCase()))&&['country','city','street'].every(k=>!filters[k]||i[k]===filters[k]));
  renderSummary(shown);
  $('#result-count').textContent=`${shown.length} issue${shown.length===1?'':'s'}`;
- $('#issues-list').innerHTML=shown.length?shown.map(i=>`<article class="issue-card ${status(i)}"><button class="issue-open" data-action="detail" data-id="${esc(i.id)}" aria-expanded="${selected?.id===i.id}"><div class="issue-row"><img src="${esc(i.thumbnail)}" alt=""><div>${badge(i)}<h3>${esc(i.title||i.category)}</h3><p class="hint">${esc([i.street,i.city,i.country].filter(Boolean).join(', ')||'Selected map location')}${issueScope==='all'&&searchCenter?' · '+kmBetween(searchCenter.lat,searchCenter.lon,i.lat,i.lon).toFixed(1)+' km':''}</p></div></div><div class="issue-meta"><span>ETA: ${stamp(i.deadline)}</span><span>${i.resolved!==null?'Time taken':'Elapsed'}: ${elapsed(i)}</span></div></button><p class="raised">Raised by <button class="person" data-action="reporter" data-id="${esc(i.user_id)}" data-name="${esc(i.reporter)}">${esc(i.reporter)}</button></p></article>`).join(''):'<p class="empty">'+(issues.length?'No issues match these filters.':(issueScope==='mine'?'You haven’t reported any issues yet.':'No issues found in this area. Try increasing the distance or selecting another location.'))+'</p>';
+ $('#issues-list').innerHTML=shown.length?shown.map(i=>`<article class="issue-card ${status(i)}"><button class="issue-open" data-action="detail" data-id="${esc(i.id)}" aria-expanded="${selected?.id===i.id}"><div class="issue-row"><img src="${esc(i.thumbnail)}" alt=""><div>${badge(i)}<h3>${esc(i.title||i.category)}</h3><p class="hint">${esc([i.street,i.city,i.country].filter(Boolean).join(', ')||'Selected map location')}${issueScope==='all'&&searchMode==='distance'&&searchCenter?' · '+kmBetween(searchCenter.lat,searchCenter.lon,i.lat,i.lon).toFixed(1)+' km':''}</p></div></div><div class="issue-meta"><span>ETA: ${stamp(i.deadline)}</span><span>${i.resolved!==null?'Time taken':'Elapsed'}: ${elapsed(i)}</span></div></button><p class="raised">Raised by <button class="person" data-action="reporter" data-id="${esc(i.user_id)}" data-name="${esc(i.reporter)}">${esc(i.reporter)}</button></p></article>`).join(''):'<p class="empty">'+(issues.length?'No issues match these filters.':(issueScope==='mine'?'You haven’t reported any issues yet.':'No issues found in this area. Try increasing the distance or selecting another location.'))+'</p>';
 }
 function renderSummary(rows){
  const counts={open:0,overdue:0,resolved:0};rows.forEach(i=>counts[status(i)]++);const total=rows.length,open=counts.open+counts.overdue;
@@ -301,14 +316,15 @@ document.addEventListener('click',async event=>{
  if(action==='profile'){saveReportFields();renderProfile();}
  if(action==='retry-list')loadIssues();
  if(action==='clear-filters'){searchText='';filters={status:'',country:'',city:'',street:''};selected=null;renderList();}
- if(action==='upload'||action==='camera'){saveReportFields();if(window.Native)selectNativePhoto(action==='camera');else $('#image-input').click();}
+ if(action==='upload'||action==='camera'){saveReportFields();if(window.Native)selectNativePhoto(action==='camera');else $(action==='camera'?'#camera-input':'#image-input').click();}
+ if(action==='crop')openCrop();
  if(action==='detail')openIssue(button.dataset.id);
  if(action==='close-detail'){selected=null;$('#issue-detail').innerHTML='';renderCards();}
- if(action==='reporter'){issueScope='mine';searchText='';reporter={id:button.dataset.id,name:button.dataset.name};filters={status:'',country:'',city:'',street:''};renderIssuesPage(false);}
+ if(action==='reporter'){issueScope='reporter';searchText='';reporter={id:button.dataset.id,name:button.dataset.name};filters={status:'',country:'',city:'',street:''};renderIssuesPage(false);}
  if(action==='upload-proof'){if(window.Native)selectNativePhoto(false,true);else $('#proof-input').click();}
  if(action==='remove-proof'){selected.latestPhoto='';$('#latest-photo').innerHTML='';}
 });
-window.appBack=()=>{if(picker){closePicker();return;}if(selected){selected=null;$('#issue-detail').innerHTML='';renderCards();}else if(mode==='register'&&!currentUser){mode='login';authPage();}else if(currentUser){saveReportFields();active='home';landing();}};
+window.appBack=()=>{if(cropDialog){closeCrop();return;}if(picker){closePicker();return;}if(selected){selected=null;$('#issue-detail').innerHTML='';renderCards();}else if(mode==='register'&&!currentUser){mode='login';authPage();}else if(currentUser){saveReportFields();active='home';landing();}};
 let lastTimeSignature='';
 setInterval(()=>{if(active==='issues'&&currentUser){const signature=issues.map(i=>status(i)+elapsed(i)).join('|');if(signature!==lastTimeSignature){renderCards();lastTimeSignature=signature;}if(selected?.deadline&&$('#detail-status')){$('#detail-status').innerHTML=badge(selected);$('#detail-elapsed').textContent=elapsed(selected);}}},1000);
 (async()=>{if(!DEMO_LOGIN&&(config.user?.id||webToken)){shell('<section class="panel"><p role="status">Signing in…</p></section>');try{currentUser=await api('GET','/me');landing();return;}catch{if(window.Native)Native.logout();webToken='';sessionStorage.removeItem('civicfix-session');}}authPage();})();
