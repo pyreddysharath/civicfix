@@ -22,7 +22,7 @@ function setup(demo=true){
  choosePhoto(id){setTimeout(()=>w.nativeReply(id,{photo},null),0)},capture(id){this.choosePhoto(id)},
  geocode(id,query){setTimeout(()=>w.nativeReply(id,{items:query==='London'?[{lat:51.5,lon:-.12,city:'London',country:'UK',label:'London, UK'}]:[]},null),0)},
  reverseGeocode(id,lat,lon){setTimeout(()=>w.nativeReply(id,{lat,lon,accuracy:0,city:'Chosen city',country:'India'},null),0)}};
- w.eval(leaflet);w.eval((demo?source:source.replace('const DEMO_LOGIN=true','const DEMO_LOGIN=false'))+`\nwindow.testState={seed(){demoIssues=[{...demoIssues[0],id:'near',resolved:null,lat:17.4,lon:78.3},{...demoIssues[0],id:'far',resolved:null,lat:17.44,lon:78.3},{...demoIssues[0],id:'late',resolved:null,deadline:Date.now()/1000-1,lat:17.4,lon:78.3},{...demoIssues[0],id:'closed',lat:17.4,lon:78.3}];},point(lat,lng){picker.map.fire('click',{latlng:{lat,lng}});}};`);
+ w.eval(leaflet);w.eval((demo?source:source.replace('const DEMO_LOGIN=true','const DEMO_LOGIN=false'))+`\nwindow.testState={foreign(){demoIssues.push({...demoIssues[0],id:'foreign',user_id:'another-user',reporter:'Another person'});},seed(){demoIssues=[{...demoIssues[0],id:'near',resolved:null,lat:17.4,lon:78.3},{...demoIssues[0],id:'far',resolved:null,lat:17.44,lon:78.3},{...demoIssues[0],id:'late',resolved:null,deadline:Date.now()/1000-1,lat:17.4,lon:78.3},{...demoIssues[0],id:'closed',lat:17.4,lon:78.3}];},point(lat,lng){picker.map.fire('click',{latlng:{lat,lng}});}};`);
  const $=s=>w.document.querySelector(s);
  const click=async s=>{assert($(s),'Missing '+s);$(s).click();await pause();};
  const fill=(s,v)=>{$(s).value=v;$(s).dispatchEvent(new w.Event('input',{bubbles:true}));};
@@ -33,7 +33,7 @@ function setup(demo=true){
  let t=setup();const {w,$,click,fill,submit}=t;
  try{
   await click('#auth-submit');assert($('.report-entry'));assert(!$('#report-form'));assert.equal(t.gps(),0);assert.equal($('.avatar').textContent,'D');
-  await click('[data-action="report"]');assert($('#report-form'));assert(!$('#title'));
+  await click('[data-action="report"]');assert($('#report-form'));assert(!$('#title'));assert(!$('#report-photo'));assert(!$('#refresh-location'));assert(!$('.required'));assert(!$('.welcome'));
   assert.deepEqual([...$('#report-form').querySelectorAll('select,textarea')].map(x=>x.id),['category','description','eta']);assert.equal($('#eta').value,'7');
   fill('#category','Roads & Potholes');await click('[data-action="camera"]');await pause();assert.equal(t.gps(),1);assert.match($('#coordinates').textContent,/17.40000/);
   await submit('#report-form');assert.equal($('.stat.total strong').textContent,'1');assert.equal($('.stat.open strong').textContent,'1');assert.equal(t.requests.length,0);
@@ -48,11 +48,14 @@ function setup(demo=true){
   await click('[data-action="pick-search"]');assert($('#picker-map'));w.testState.point(0,0);await click('#use-map');assert(!w.document.querySelector('dialog'));assert.equal($('.stat.total strong').textContent,'0');
   fill('#area-query','London');await submit('#area-search');await click('.place-result');assert.match($('#area-status').textContent,/London/);
   await click('[data-action="scope-mine"]');assert(!$('#radius'));assert.equal($('.stat.total strong').textContent,'4');
+  w.testState.foreign();await click('[data-action="retry-list"]');assert.equal($('.stat.total strong').textContent,'4');
+  await click('[data-action="scope-all"]');$('#search-mode').value='fields';$('#search-mode').dispatchEvent(new w.Event('change'));await pause();fill('#field-query','Another person');await submit('#field-search');assert.equal($('.stat.total strong').textContent,'1');
+  await click('[data-action="scope-mine"]');assert.equal($('.stat.total strong').textContent,'4');
   await click('[data-action="home"]');await click('[data-action="report"]');fill('#category','Electricity');await click('[data-action="upload"]');t.deny(true);await click('#refresh-location');assert.match($('#location-status').textContent,/GPS denied/);
   await click('[data-action="pick-report"]');w.testState.point(0,0);await click('#use-map');assert.match($('#coordinates').textContent,/Selected point: 0.00000, 0.00000/);
   await submit('#report-form');assert.equal($('.stat.total strong').textContent,'5');
   // A late GPS response must not override a manually chosen point.
-  await click('[data-action="home"]');await click('[data-action="report"]');t.deny(false);t.hold(true);await click('#refresh-location');await click('[data-action="pick-report"]');w.testState.point(1,2);await click('#use-map');await new Promise(r=>setTimeout(r,120));assert.match($('#coordinates').textContent,/1.00000, 2.00000/);
+  await click('[data-action="home"]');await click('[data-action="report"]');await click('[data-action="upload"]');t.deny(false);t.hold(true);await click('#refresh-location');await click('[data-action="pick-report"]');w.testState.point(1,2);await click('#use-map');await new Promise(r=>setTimeout(r,120));assert.match($('#coordinates').textContent,/1.00000, 2.00000/);
   await click('[data-action="profile"]');await click('[data-action="logout"]');await click('#auth-submit');await click('[data-action="issues"]');await click('[data-action="scope-mine"]');assert.equal($('.stat.total strong').textContent,'0');assert.equal(t.requests.length,0);
  }finally{t.dom.window.close();}
  t=setup(false);
