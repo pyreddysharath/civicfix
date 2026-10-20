@@ -22,7 +22,7 @@ function setup(demo=true){
  choosePhoto(id){setTimeout(()=>w.nativeReply(id,{photo},null),0)},capture(id){this.choosePhoto(id)},
  geocode(id,query){setTimeout(()=>w.nativeReply(id,{items:query==='London'?[{lat:51.5,lon:-.12,city:'London',country:'UK',label:'London, UK'}]:[]},null),0)},
  reverseGeocode(id,lat,lon){setTimeout(()=>w.nativeReply(id,{lat,lon,accuracy:0,city:'Chosen city',country:'India'},null),0)}};
- w.eval(leaflet);w.eval((demo?source:source.replace('const DEMO_LOGIN=true','const DEMO_LOGIN=false'))+`\nwindow.testState={foreign(){demoIssues.push({...demoIssues[0],id:'foreign',user_id:'another-user',reporter:'Another person'});},seed(){demoIssues=[{...demoIssues[0],id:'near',resolved:null,lat:17.4,lon:78.3},{...demoIssues[0],id:'far',resolved:null,lat:17.44,lon:78.3},{...demoIssues[0],id:'late',resolved:null,deadline:Date.now()/1000-1,lat:17.4,lon:78.3},{...demoIssues[0],id:'closed',lat:17.4,lon:78.3}];},point(lat,lng){picker.map.fire('click',{latlng:{lat,lng}});}};`);
+ w.eval(leaflet);w.eval((demo?source:source.replace('const DEMO_LOGIN=true','const DEMO_LOGIN=false'))+`\nwindow.testState={foreign(){demoIssues.push({...demoIssues[0],id:'foreign',user_id:'another-user',reporter:'Another person',city:'Vijayawada'});},seed(){demoIssues=[{...demoIssues[0],id:'near',resolved:null,lat:17.4,lon:78.3},{...demoIssues[0],id:'far',resolved:null,lat:17.44,lon:78.3},{...demoIssues[0],id:'late',resolved:null,deadline:Date.now()/1000-1,lat:17.4,lon:78.3},{...demoIssues[0],id:'closed',lat:17.4,lon:78.3}];},point(lat,lng){picker.map.fire('click',{latlng:{lat,lng}});}};`);
  const $=s=>w.document.querySelector(s);
  const click=async s=>{assert($(s),'Missing '+s);$(s).click();await pause();};
  const fill=(s,v)=>{$(s).value=v;$(s).dispatchEvent(new w.Event('input',{bubbles:true}));};
@@ -41,15 +41,18 @@ function setup(demo=true){
   await click('[data-action="home"]');await click('[data-action="profile"]');fill('#profile-name','Sharath');fill('#profile-email','demo@example.com');await submit('#profile-form');assert.equal($('.avatar').textContent,'S');
   // Seed issues in both sides of the 3km boundary; all remain isolated to demo memory.
   w.testState.seed();
-  await click('[data-action="issues"]');await pause();assert.equal($('#radius').value,'3');assert.equal($('.stat.total strong').textContent,'3');assert.equal($('.stat.open strong').textContent,'2');assert.equal($('.stat.closed strong').textContent,'1');assert.match($('.pie-chart').getAttribute('aria-label'),/1 overdue/);
+  await click('[data-action="issues"]');assert(!$('#radius'));assert.equal($('.stat.total strong').textContent,'4');assert(!$('#filter-status'));assert(!$('#filter-street'));assert(!$('#issue-query'));
+  await click('[data-action="status-open"]');assert.equal(w.document.querySelectorAll('.issues-table tbody tr').length,3);assert.equal($('.stat.total strong').textContent,'4');assert(!$('#show-all').checked);
+  await click('[data-action="status-closed"]');assert.equal(w.document.querySelectorAll('.issues-table tbody tr').length,1);await click('#show-all');assert.equal(w.document.querySelectorAll('.issues-table tbody tr').length,4);
+  await click('[data-action="scope-all"]');await pause();assert($('[name="search-mode"][value="distance"]').checked);assert.equal($('#radius').value,'3');assert.equal($('.stat.total strong').textContent,'3');assert.equal($('.stat.open strong').textContent,'2');assert.equal($('.stat.closed strong').textContent,'1');assert.match($('.pie-chart').getAttribute('aria-label'),/1 overdue/);
   fill('#radius','5');$('#radius').dispatchEvent(new w.Event('change'));await pause();assert.equal($('.stat.total strong').textContent,'4');
   fill('#radius','0');$('#radius').dispatchEvent(new w.Event('change'));assert.equal($('#radius').value,'5');
-  fill('#issue-query','not found');assert.equal($('.stat.total strong').textContent,'0');assert.match($('.chart-legend').textContent,/No issues to chart/);await click('[data-action="clear-filters"]');
+  fill('#filter-category','not found');assert.equal($('.stat.total strong').textContent,'0');assert.match($('.chart-legend').textContent,/No issues to chart/);fill('#filter-category','');
   await click('[data-action="pick-search"]');assert($('#picker-map'));w.testState.point(0,0);await click('#use-map');assert(!w.document.querySelector('dialog'));assert.equal($('.stat.total strong').textContent,'0');
   fill('#area-query','London');await submit('#area-search');await click('.place-result');assert.match($('#area-status').textContent,/London/);
   await click('[data-action="scope-mine"]');assert(!$('#radius'));assert.equal($('.stat.total strong').textContent,'4');
   w.testState.foreign();await click('[data-action="retry-list"]');assert.equal($('.stat.total strong').textContent,'4');
-  await click('[data-action="scope-all"]');$('#search-mode').value='fields';$('#search-mode').dispatchEvent(new w.Event('change'));await pause();fill('#field-query','Another person');await submit('#field-search');assert.equal($('.stat.total strong').textContent,'1');
+  await click('[data-action="scope-all"]');const gpsBefore=t.gps();await click('[name="search-mode"][value="location"]');assert.equal(t.gps(),gpsBefore);assert.equal($('.stat.total strong').textContent,'5');fill('#filter-city','vijay');assert.equal($('.stat.total strong').textContent,'1');fill('#filter-country','india');assert.equal($('.stat.total strong').textContent,'1');fill('#filter-category','electric');assert.equal($('.stat.total strong').textContent,'0');
   await click('[data-action="scope-mine"]');assert.equal($('.stat.total strong').textContent,'4');
   await click('[data-action="home"]');await click('[data-action="report"]');fill('#category','Electricity');await click('[data-action="upload"]');t.deny(true);await click('#refresh-location');assert.match($('#location-status').textContent,/GPS denied/);
   await click('[data-action="pick-report"]');w.testState.point(0,0);await click('#use-map');assert.match($('#coordinates').textContent,/Selected point: 0.00000, 0.00000/);
