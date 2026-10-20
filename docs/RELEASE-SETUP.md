@@ -2,7 +2,7 @@
 
 ## Permanent APK signing
 
-Keep application ID com.civicfix.app unchanged. Version code is now 5; increase it for each subsequent build. The workflow compiles on every push but publishes an APK only when all four signing secrets exist. It never publishes an APK signed with a newly generated debug key.
+Keep application ID com.civicfix.app unchanged. Version code is now 5; increase it for each subsequent build. The workflow publishes CivicFix-0.4.0-test-apk on every push for immediate testing. This uses a temporary debug key and may require uninstalling an older build. It additionally publishes CivicFix-signed-apk when all four permanent signing secrets exist. Use the signed release for consistent future updates.
 
 1. Use the ORIGINAL signing keystore if available. Otherwise create one permanent keystore in Android Studio (Build > Generate Signed Bundle / APK > APK > Create new). Keep an encrypted backup and its passwords; never commit them.
 2. Base64-encode that keystore locally. Linux: `base64 -w 0 civicfix.jks > keystore-base64.txt`. On macOS: `base64 -i civicfix.jks -o keystore-base64.txt`. Treat the output as a secret.
