@@ -1,15 +1,12 @@
-# CivicFix 0.2 device checks
+# CivicFix 0.3 device checklist
 
-1. Build and install the new APK on Android 8.0+; connect to the deployed HTTPS backend using Server connection on the login screen.
-2. Check that login has only email/password/Login/Create an account, with no bottom tabs.
-3. Create an account with a name; send an email OTP. Verify actual delivery, wrong code, expired code, resend cooldown, and password mismatch behavior. Verify an unverified email cannot register.
-4. Log in and check the two side-by-side buttons at narrow portrait width and with large system text.
-5. Open Report an Issue. Test GPS permission allowed and denied, location services off, network unavailable, and a place with no returned street. Location fields must not allow typing.
-6. Select a photo from the system picker and separately capture one. Cancel either flow, then retry. Check portrait/landscape orientation and that selecting a photo retains the title and description.
-7. Submit with no description and default one-week ETA. Confirm no selection below one week exists. Reload My Reported Issues and confirm the stored details.
-8. Check status/country/city/street filters individually and in combination; clear filters. Select a card and confirm its details open below the list. Tap Raised by and confirm only that person's records are shown.
-9. Mark one issue resolved without a photo and another with a latest photo. Both turn green; original photos remain. A different account cannot close another reporter's issue.
-10. Test an issue at its exact ETA boundary using controlled test data: amber before, red at/after, green after resolution even if late. Verify elapsed time stops at closure.
-11. Log out and back in. Verify no previous user's issues remain on the new user's screen. Restart the app and verify session recovery.
-
-A report's GPS is the phone's current location, not the location where an uploaded image was originally taken. Refresh GPS after moving. Signup requires a working backend and mail service; no local/offline account is created.
+1. Install version 0.3.0. Click Login with blank fields: home shows Report an Issue; Issues and initial avatar are in the header. No GPS prompt until a location-related action.
+2. Open Report an Issue. Confirm Category, Image, optional Description, ETA; default/minimum 7 days.
+3. Capture an image, allow GPS, confirm location updates after capture. Capture a second photo from another location and confirm GPS refreshes. Deny GPS and confirm map selection remains available.
+4. Upload an image, choose current GPS or a map point. Search a place, select the correct result, move the pin, confirm. Verify optional description and category appear in details.
+5. Open Issues. Confirm All issues defaults to 3km around current GPS. Adjust radius, select a different country/city via search and map, and confirm results change. Check GPS-denied/no-network/empty-result messages.
+6. Switch to My reported Issues; reports outside the nearby radius remain visible. Filter by text, status and address; pie chart and totals should match the filtered list. Open includes overdue; amber + red + green equals total.
+7. Select a report, resolve with and without a latest photo; counts and green status update. Click Raised by to view all reports by that person.
+8. Edit profile name and check the avatar and reporter name. Demo details are session-only. In real account mode verify new-email OTP is required and old email can no longer log in after a successful change.
+9. Verify map attribution is visible, zoom/pan/pin placement work, hardware Back closes the map, and a delayed GPS result does not replace a confirmed map point.
+10. To test shared data, deploy the updated backend, configure SMTP, disable DEMO_LOGIN and rebuild. Use two accounts/devices to confirm nearby shared reports and ownership restrictions. Verify data survives a backend restart with persistent storage configured.
