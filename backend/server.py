@@ -156,10 +156,25 @@ def clean_photo(value):
         if min(im.size)<160: raise ValueError()
         im.thumbnail((1600,1600)); out=io.BytesIO(); im.save(out,'JPEG',quality=85)
         im.thumbnail((240,240)); small=io.BytesIO(); im.save(small,'JPEG',quality=65)
+        moderate_photo(out.getvalue())
         return out.getvalue(), data_url(small.getvalue())
     except (ValueError,UnidentifiedImageError,OSError,Image.DecompressionBombError,Image.DecompressionBombWarning):
         raise ApiError('Use a valid JPEG, PNG or WebP, at least 160px and under 5 MB.')
 def data_url(blob): return 'data:image/jpeg;base64,'+base64.b64encode(blob).decode()
+def moderate_photo(photo):
+    """Fail closed: never persist an image without a successful safety result."""
+    key=os.environ.get('OPENAI_API_KEY')
+    if not key: raise ApiError('Photo safety screening is not configured. Please try again later.',503)
+    payload={'model':'omni-moderation-latest','input':[{'type':'image_url','image_url':{'url':data_url(photo)}}]}
+    req=urllib.request.Request('https://api.openai.com/v1/moderations',json.dumps(payload).encode(),{'Content-Type':'application/json','Authorization':'Bearer '+key})
+    try:
+        with urllib.request.urlopen(req,timeout=40) as response: result=json.load(response)
+        flagged=result['results'][0]['flagged']
+        if not isinstance(flagged,bool): raise ValueError('Invalid safety result')
+    except (urllib.error.URLError,TimeoutError,ValueError,KeyError,IndexError,TypeError):
+        raise ApiError('Photo safety screening is temporarily unavailable. Nothing was saved; please retry.',503)
+    if flagged: raise ApiError('This photo did not pass safety screening. Please choose another photo.',422)
+
 def vision(prompt, photos):
     key=os.environ.get('OPENAI_API_KEY'); model=os.environ.get('OPENAI_VISION_MODEL')
     if not key or not model: return None

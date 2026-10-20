@@ -10,6 +10,7 @@ def photo(color):
     out=io.BytesIO();Image.new('RGB',(320,240),color).save(out,'JPEG');return s.data_url(out.getvalue())
 class WorkflowTests(unittest.TestCase):
     def setUp(self):
+        moderation=patch.object(s,'moderate_photo');moderation.start();self.addCleanup(moderation.stop)
         with s.database() as db:
             for table in ['events','proofs','issues','sessions','users','limits','email_verifications']: db.execute('DELETE FROM '+table)
         self.owner=self.register('reporter@example.com','Sharath','long-password-123')
