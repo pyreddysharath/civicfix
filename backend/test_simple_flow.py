@@ -79,4 +79,34 @@ class SimpleFlowTests(base.WorkflowTests):
     def test_reporter_email_is_not_in_issue_responses(self):
         r=self.report();self.assertNotIn('username',r);self.assertEqual(r['reporter'],'Sharath')
 
+    def test_category_without_title_and_map_without_address(self):
+        r=self.report(title='',category='Electricity',city='',country='',street='',state='',accuracy=0)
+        self.assertEqual(r['title'],'Electricity');self.assertEqual(r['city'],'')
+        with self.assertRaises(s.ApiError):self.report(request_id='invalid-category',category='Invalid')
+    def test_radius_boundary_and_invalid_partial_queries(self):
+        self.report(request_id='near',lat=17.4,lon=78.3)
+        self.report(request_id='far',lat=17.44,lon=78.3)
+        self.assertEqual(self.call('GET','/issues',query={'lat':'17.4','lon':'78.3','radius':'3'})['total'],1)
+        self.assertEqual(self.call('GET','/issues',query={'lat':'17.4','lon':'78.3','radius':'5'})['total'],2)
+        for q in [{'radius':'3'},{'lat':'17.4'},{'lat':'nan','lon':'78','radius':'3'},{'lat':'17','lon':'78','radius':'0'}]:
+            with self.assertRaises(s.ApiError):self.call('GET','/issues',query=q)
+    def test_profile_name_updates_reporter_and_keeps_owner(self):
+        r=self.report();me=self.call('POST','/me',{'name':'New Name'})
+        self.assertEqual(me['id'],self.owner['user']['id'])
+        self.assertEqual(self.call('GET','/issues/'+r['id'])['reporter'],'New Name')
+        self.assertEqual(self.call('GET','/me',token=self.other['token'])['name'],'Neighbour')
+    def test_profile_email_requires_verification_and_revokes_other_sessions(self):
+        second=self.call('POST','/auth/login',{'email':'reporter@example.com','password':'long-password-123'})
+        with self.assertRaises(s.ApiError):self.call('POST','/me',{'name':'New','email':'new@example.com'})
+        verification=self.verify(self.send())
+        me=self.call('POST','/me',{'name':'New','email':'new@example.com','verification_token':verification})
+        self.assertEqual(me['username'],'new@example.com');self.assertEqual(self.call('GET','/me')['name'],'New')
+        with self.assertRaises(s.ApiError):self.call('GET','/me',token=second['token'])
+        self.assertEqual(self.call('POST','/auth/login',{'email':'new@example.com','password':'long-password-123'})['user']['id'],me['id'])
+    def test_profile_cannot_take_existing_email(self):
+        with patch.object(s,'now',return_value=s.now()+61):
+            token=self.verify(self.send('helper@example.com'),'helper@example.com')
+            with self.assertRaises(s.ApiError) as cm:self.call('POST','/me',{'name':'New','email':'helper@example.com','verification_token':token})
+        self.assertEqual(cm.exception.status,409);self.assertEqual(self.call('GET','/me')['username'],'reporter@example.com')
+
 if __name__=='__main__':unittest.main(verbosity=2)

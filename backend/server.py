@@ -7,7 +7,8 @@ from contextlib import contextmanager
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 DB = os.environ.get('CIVICFIX_DB', str(Path(__file__).with_name('civicfix.sqlite3')))
-CATEGORIES = ['Road', 'Construction', 'Waste', 'Drainage', 'Streetlight', 'Water', 'Other']
+CATEGORIES = ['Roads & Potholes', 'Electricity', 'Street Lighting', 'Cleaning & Waste', 'Drainage & Sewage', 'Water Supply', 'Construction & Debris', 'Footpaths & Accessibility', 'Parks & Public Spaces', 'Traffic Signs & Signals', 'Other']
+CATEGORY_ALIASES = {'Road':'Roads & Potholes','Construction':'Construction & Debris','Waste':'Cleaning & Waste','Drainage':'Drainage & Sewage','Streetlight':'Street Lighting','Water':'Water Supply'}
 Image.MAX_IMAGE_PIXELS = 20000000
 class ApiError(Exception):
     def __init__(self, message, status=400): self.message, self.status = message, status
@@ -219,6 +220,23 @@ def dispatch(method,path,query,body,token,ip):
         with database() as db: db.execute('DELETE FROM sessions WHERE token=?',(hashlib.sha256(token.encode()).hexdigest(),))
         return {'ok':True}
     if method=='GET' and path=='/me': return public_user(u)
+    if method=='POST' and path=='/me':
+        name=text(body,'name',80); email=email_address(body) if 'email' in body else u['username']
+        with database() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if email!=u['username']:
+                verification=text(body,'verification_token',200)
+                row=db.execute('SELECT * FROM email_verifications WHERE email=?',(email,)).fetchone()
+                if not row or not row['verification_hash'] or (row['verified_until'] or 0)<=now() or not hmac.compare_digest(row['verification_hash'],hashlib.sha256(verification.encode()).hexdigest()):
+                    raise ApiError('Verify your new email address before saving.')
+            try: db.execute('UPDATE users SET name=?,username=? WHERE id=?',(name,email,u['id']))
+            except sqlite3.IntegrityError: raise ApiError('This email is already used by another account.',409)
+            if email!=u['username']:
+                db.execute('DELETE FROM email_verifications WHERE email=?',(email,))
+                # Keep this device signed in; revoke other sessions after an email change.
+                db.execute('DELETE FROM sessions WHERE user_id=? AND token!=?',(u['id'],hashlib.sha256(token.encode()).hexdigest()))
+        return {**public_user(u),'name':name,'username':email}
+
     if method=='POST' and path=='/location':
         # Browsers have GPS but no native reverse geocoder. Android uses its built-in Geocoder.
         raise ApiError('Address detection is available in the Android app. Open CivicFix on Android to report an issue.',503)
@@ -234,11 +252,12 @@ def dispatch(method,path,query,body,token,ip):
         eta_days=number(body,'eta_days',7,366)
         if not eta_days.is_integer(): raise ApiError('ETA must be a whole number of days, at least 7.')
         photo,thumbnail=clean_photo(body.get('photo')); category=text(body,'category',40,False) or 'Other'
+        category=CATEGORY_ALIASES.get(category,category)
         if category not in CATEGORIES: raise ApiError('Invalid category')
         # Analysis is server-owned; do not trust client AI claims.
         analysis={}; id=secrets.token_hex(12); created=now(); deadline=created+eta_days*86400
-        params=(id,u['id'],created,deadline,None,text(body,'title',160),text(body,'description',3000,False),category,
-                text(body,'street',200,False),text(body,'city',100),text(body,'state',100,False),text(body,'country',100),lat,lon,accuracy,captured,photo,thumbnail,json.dumps(analysis),request_id)
+        params=(id,u['id'],created,deadline,None,(text(body,'title',160,False) or category),text(body,'description',3000,False),category,
+                text(body,'street',200,False),text(body,'city',100,False),text(body,'state',100,False),text(body,'country',100,False),lat,lon,accuracy,captured,photo,thumbnail,json.dumps(analysis),request_id)
         try:
             with database() as db:
                 db.execute('INSERT INTO issues VALUES('+','.join('?' for _ in params)+')',params)
@@ -265,7 +284,7 @@ def dispatch(method,path,query,body,token,ip):
         if status=='open': where.append('i.resolved IS NULL AND i.deadline>?'); args.append(now())
         if status=='overdue': where.append('i.resolved IS NULL AND i.deadline<=?'); args.append(now())
         with database() as db: rows=db.execute('SELECT i.*,u.name AS reporter,u.username FROM issues i JOIN users u ON i.user_id=u.id WHERE '+' AND '.join(where)+' ORDER BY i.created DESC',args).fetchall()
-        if 'lat' in query:
+        if any(k in query for k in ('lat','lon','radius')):
             lat=number(query,'lat',-90,90); lon=number(query,'lon',-180,180); radius=number(query,'radius',0.1,200)*1000
             rows=[r for r in rows if distance(lat,lon,r['lat'],r['lon'])<=radius]
             rows.sort(key=lambda r:distance(lat,lon,r['lat'],r['lon']))
@@ -326,7 +345,7 @@ def application(env,start_response):
     try:
         from urllib.parse import parse_qs
         method=env['REQUEST_METHOD']; path=env.get('PATH_INFO',''); body={}
-        if method=='GET' and path in ('/','/index.html','/app.js','/style.css'):
+        if method=='GET' and path in ('/','/index.html','/app.js','/style.css','/leaflet.js','/leaflet.css'):
             name='index.html' if path=='/' else path[1:]
             asset=Path(__file__).parent.parent/'android/app/src/main/assets'/name
             if not asset.is_file(): raise ApiError('Web assets are not installed.',404)
