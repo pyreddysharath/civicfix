@@ -1,28 +1,29 @@
-# CivicFix 0.2 — simplified Android app
+# CivicFix 0.3 — reports, nearby issues and profile
 
-A simple login and reporting flow. The bottom navigation tabs have been removed.
+Android 8.0+ community issue reporting. Version code 4, version name 0.3.0.
 
 ## Screens
 
-- Login: Email ID, Password, Login, and Create an account.
-- Create an account: email OTP, Verify email, Name, Password and Confirm password. Name supplies the Raised by field.
-- Landing page: Report an Issue and My Reported Issues, side by side.
-- Report an Issue: uploaded image or camera photo, required title, optional description, GPS-detected read-only country/state/city/street, and ETA. Default and minimum ETA: seven days from successful server creation.
-- My Reported Issues: current user's reports with status, country, city and street filters. Click an issue to expand its details below the list. Click Raised by to list that person's reports.
-- The reporter may mark an issue resolved with or without a latest photo. Both original and supplied latest photos remain visible.
+- Home opens with one main **Report an Issue** button. The header contains **Issues** and a profile avatar with the first letter of the user's name. No report fields or GPS prompt appear until requested.
+- Reporting order: **Category → Image (Capture / Upload) → Description (optional) → ETA**. The image section includes the GPS summary and current-GPS / map-selection controls. Title is generated from the category. Minimum/default ETA remains 7 days.
+- Categories: Roads & Potholes, Electricity, Street Lighting, Cleaning & Waste, Drainage & Sewage, Water Supply, Construction & Debris, Footpaths & Accessibility, Parks & Public Spaces, Traffic Signs & Signals, Other.
+- Capturing a photo refreshes the current GPS. An uploaded image needs current GPS or a manually selected map point. Coordinates and any available address are saved. A missing reverse-geocoded address does not discard valid coordinates.
+- **Issues** opens **All issues**, initially within **3 km** of the current location. Adjust distance from 0.1 to 200 km, search a city/street/area, or select a map pin anywhere. **My reported Issues** lists all the current user's reports regardless of distance. Clicking Raised by lists that user's reports.
+- Text search and status/country/city/street filters apply to the list and chart. Total = Open + Closed. Open includes overdue reports. The donut pie chart splits open within ETA (amber), overdue (red), and closed (green). Empty results show zero counts, not invented sample data.
+- Issue details preserve original image and entered information, optional latest image, and reporter-only resolution. Closed issues stay green even if resolved late.
+- The profile avatar opens editable name and email. Real account email changes require an OTP to the new email. Other device sessions are revoked after an email change. Demo profile changes stay within the current session.
 
-Status is **amber** while unresolved before ETA, **red** when ETA is reached or passed, and **green** once resolved. Resolved status remains green even for a late fix. The detail view includes the original data, creation time, ETA, elapsed time or time taken, and resolution time.
+## Temporary demo login
 
-Resolution in the new flow is the reporter's confirmation; it does not claim independent or AI verification. Legacy proof-review API endpoints remain for existing data/clients but are absent from the new interface. New reporting does not make AI calls.
+`DEMO_LOGIN=true` remains enabled as requested. Clicking Login opens an isolated demo without contacting the backend, even with blank fields. Demo reports and profile edits stay in memory and are cleared on logout or app restart. All issues in demo mode means reports created in that session; it is not a live global database.
+
+Real signup remains available when a backend and SMTP sender are configured. Set `DEMO_LOGIN=false` in `android/app/src/main/assets/app.js` and rebuild to restore actual account login. Never remove backend authentication to simulate login.
 
 ## Build and install
 
-1. Upload this ZIP's contents to the repository root, preserving `.github`, `android`, `backend`, `docs`, and `tests`. Replace matching files. Do not upload just the ZIP or put everything inside another directory.
-2. GitHub Actions → Build Android APK. A push starts a build, or run it manually.
-3. After success, download the CivicFix-debug-apk artifact. Unzip and install app-debug.apk on an Android 8.0+ device.
-4. On the login screen expand Server connection and save your deployed backend's HTTPS base address. Sign up, verify your email, then log in.
+The GitHub Actions **Build Android APK** workflow builds the Android app. After success, download **CivicFix-debug-apk**, unzip it and install `app-debug.apk`. A source update does not update an already installed APK. Debug signing keys can differ between runners; use consistent release signing before distributing the app.
 
-This release increments versionCode to 2 and versionName to 0.2.0. It must be rebuilt; an older APK will not contain these changes. GitHub's previous successful 0.1 build does not validate this release. GitHub runners may generate different debug signing keys across builds; if an update says the signatures differ, use a consistently signed build or uninstall the old test app (which clears its local data).
+For a real account, save your backend HTTPS address under **Server connection** on the login page. Deploy the updated backend along with this APK to enable new categories and profile updates. Existing user and issue records are preserved; legacy category inputs remain accepted.
 
 ## Backend and email OTP setup
 
@@ -57,21 +58,15 @@ For local device testing only, use HOST=0.0.0.0 python server.py on a trusted LA
 
 The existing backend Dockerfile builds from the backend directory and supports the Android API. Supply the same environment variables and mount a writable volume at /data. No host or mail service is provisioned by this source package.
 
-## Location and photo behavior
+## Maps and location
 
-Android requests foreground location and uses the platform Geocoder to populate the address. GPS and address fields are read-only. Country and city must be available before submission; enable location/network access and retry if detection fails. Street/state may be unavailable in the geocoder's results and are shown as Not available without a fabricated value. Uploaded photos use the phone's current report location, not unverified photo EXIF coordinates. Refresh GPS if you change location before submitting.
+Leaflet 1.9.4 is bundled locally with its BSD-2-Clause license. Map tiles load from OpenStreetMap over HTTPS with visible attribution, normal WebView/browser caching and an app-identifying Android User-Agent. There is no tile prefetch or offline bulk download. Viewing maps sends the viewed tile area and normal connection metadata to the tile provider; the map dialog links to the provider's privacy policy. For a large deployment, choose a tile provider with suitable capacity and terms.
 
-Photos can be selected through Android's system document picker or captured with the camera. Images are resized and normalized before storage. The app asks for no broad photo-library storage permission. The optional resolution photo need not contain GPS metadata.
+Android uses the system Geocoder for explicit place searches and reverse lookup. Search results must be selected; no first-result guess silently changes the location. GPS requires Android permission; map selection still works when permission is denied. Maps and address lookups need network connectivity. Tile failures show a message and coordinate/place search remains available.
 
-## Existing users and records
+The browser preview supports browser GPS coordinates, manual map selection and issue text search. Place-name lookup uses Android's native Geocoder; in the browser use the map or enter `latitude, longitude`. No browser geocoding provider is configured. The standalone backend Docker image contains only the API; serving the browser UI requires the full project tree.
 
-The database migration adds the email verification table without dropping existing reports, users or sessions. Existing signed-in sessions remain usable. New login uses email; old username-only accounts need an operator-assisted verified email migration to preserve the same user ID. Creating a separate account will not automatically claim another account's existing reports. Local drafts from the earlier interface are not deleted but are not shown by the new login-first interface.
-
-## Browser and testing
-
-Running the backend from the full project tree also serves the bundled interface at its root for preview and account/list testing. The Android app is the complete reporting target: browser GPS-to-address lookup is not configured in this package. Browser reporting shows an explicit message to use Android. The standalone backend Docker image contains only the API.
-
-Run regression checks:
+## Verification
 
 ```bash
 cd backend
@@ -82,4 +77,4 @@ npm install --no-save jsdom@26
 node tests/ui-test.cjs
 ```
 
-The UI integration test uses a simulated Android bridge and mocked email/server responses. See docs/TEST-RESULTS.md for tested and untested areas, and docs/DEVICE-CHECKLIST.md before distributing the APK.
+The UI test runs the bundled Leaflet library in a simulated DOM and mocks the Android bridge. It checks demo/real auth boundaries, reporting order, capture GPS, map selection, radius filtering, totals, resolution, profile changes, and delayed GPS responses. Actual Android camera, permission dialogs, map-tile delivery and email delivery need a physical-device check. No live email was sent by these tests.
