@@ -2,7 +2,7 @@
 
 Home has a centered title, Report an Issue button and Issues below. Photos reveal preview/crop/GPS only after selection. Description alone is optional. Search offers distance (3 km default) or worldwide text fields; My reported Issues always restricts ownership.
 
-**Deployment required:** see [release and moderation setup](docs/RELEASE-SETUP.md). Builds now publish only permanently signed APKs when signing secrets are configured. No new rotating debug APK is distributed. Live image submissions require server-side safety screening; demo previews are explicitly unscanned. Video is a proposed next step, not enabled.
+**Deployment required:** see [release and moderation setup](docs/RELEASE-SETUP.md). Download CivicFix-0.4.0-test-apk from the latest successful Actions run for immediate testing. Its temporary debug key may require reinstalling. Permanently signed release APKs also publish once signing secrets are configured. Live image submissions require server-side safety screening; demo previews are explicitly unscanned. Video is a proposed next step, not enabled.
 
 ## Backend and email OTP setup
 
