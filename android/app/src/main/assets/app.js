@@ -42,7 +42,7 @@ async function api(method,path,body={}){
 
  if(window.Native){if(!config.server)throw Error('Set the server address under Server connection to continue.');return nativeCall('request',method,path,JSON.stringify(body));}
  const response=await fetch(path,{method,headers:{'Content-Type':'application/json','Authorization':'Bearer '+webToken},...(method==='POST'?{body:JSON.stringify(body)}:{})});
- let data;try{data=await response.json();}catch{throw Error('The CivicFix server is not available.');}
+ let data;try{data=await response.json();}catch{throw Error('The Nenu Saitham server is not available.');}
  if(!response.ok)throw Error(data.error||'Request failed. Please retry.');
  if(data.token){webToken=data.token;sessionStorage.setItem('civicfix-session',webToken);}return data;
 }
@@ -53,7 +53,7 @@ function badge(i){const s=status(i);return `<span class="badge ${s}"><i></i>${la
 function stamp(t){return new Date(t*1000).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'});}
 function elapsed(i){const seconds=Math.max(0,(i.resolved??Date.now()/1000)-i.created);const days=Math.floor(seconds/86400),hours=Math.floor(seconds%86400/3600);return days?`${days}d ${hours}h`:hours?`${hours}h ${Math.floor(seconds%3600/60)}m`:`${Math.floor(seconds/60)}m`;}
 function initial(){return Array.from((currentUser?.name||'User').trim())[0]?.toUpperCase()||'U';}
-function header(){return `<header><a class="brand" href="#" data-action="home"><span class="brand-icon">✓</span>CivicFix</a>${currentUser?`<div class="header-actions"><button class="avatar" data-action="profile" aria-label="Edit profile for ${esc(currentUser.name)}">${esc(initial())}</button></div>`:''}</header>`;}
+function header(){return `<header><a class="brand" href="#" data-action="home"><span class="brand-title" lang="te">నేను సైతం</span><span class="brand-meaning" lang="en">I, too</span></a>${currentUser?`<div class="header-actions"><button class="avatar" data-action="profile" aria-label="Edit profile for ${esc(currentUser.name)}">${esc(initial())}</button></div>`:''}</header>`;}
 function shell(html){closeCrop();closePicker();screenVersion++;$('#app').innerHTML=header()+`<main>${html}</main>`;}
 function authPage(){
  currentUser=null;report=null;selected=null;issues=[];listVersion++;
