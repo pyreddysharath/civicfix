@@ -17,8 +17,37 @@ jobs:
         with:
           gradle-version: '8.11.1'
       - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
-      - run: gradle -p android :app:assembleDebug
+      - name: Compile Android (no distributable debug APK)
+        run: gradle -p android :app:assembleDebug
+      - name: Check stable signing configuration
+        id: signing
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            printf '%s' "$KEYSTORE" | base64 --decode > "$RUNNER_TEMP/civicfix.jks"
+            chmod 600 "$RUNNER_TEMP/civicfix.jks"
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo '::warning::Compilation only. Configure the four ANDROID signing secrets before downloading an installable APK. See docs/RELEASE-SETUP.md.'
+          fi
+      - name: Build signed APK
+        if: steps.signing.outputs.ready == 'true'
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/civicfix.jks
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle -p android :app:assembleRelease
       - uses: actions/upload-artifact@v4
+        if: steps.signing.outputs.ready == 'true'
         with:
-          name: CivicFix-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: CivicFix-signed-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+      - name: Remove temporary signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/civicfix.jks"
