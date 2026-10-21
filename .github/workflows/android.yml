@@ -1,10 +1,29 @@
 name: Build Android APK
-on: [workflow_dispatch, push]
+on: [workflow_dispatch, push, pull_request]
+permissions:
+  contents: read
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          pip install -r backend/requirements.txt
+          npm install --no-save jsdom@26
+      - name: Test media screening and application
+        run: |
+          python -m unittest discover -s backend -p 'test*.py' -v
+          node tests/logic-test.cjs
+          node tests/ui-test.cjs
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -22,10 +41,11 @@ jobs:
       - name: Upload latest test APK
         uses: actions/upload-artifact@v4
         with:
-          name: CivicFix-0.4.1-test-apk
+          name: Nenu-Saitham-0.5.0-test-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
       - name: Check stable signing configuration
+        if: github.event_name != 'pull_request'
         id: signing
         env:
           KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -51,7 +71,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: steps.signing.outputs.ready == 'true'
         with:
-          name: CivicFix-signed-apk
+          name: Nenu-Saitham-signed-apk
           path: android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
       - name: Remove temporary signing key

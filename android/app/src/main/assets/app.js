@@ -13,7 +13,7 @@ let picker=null,cropDialog=null,searchMode='distance',fieldQuery='';
 let filters={status:'',category:'',country:'',city:''};
 let webToken=sessionStorage.getItem('civicfix-session')||'';
 window.nativeReply=(id,result,error)=>{const p=pending.get(id);if(!p)return;clearTimeout(p.timer);pending.delete(id);error?p.reject(Error(error)):p.resolve(result);};
-function nativeCall(method,...args){return new Promise((resolve,reject)=>{const id=crypto.randomUUID();const timer=setTimeout(()=>{pending.delete(id);reject(Error('Request timed out. Please try again.'));},150000);pending.set(id,{resolve,reject,timer});Native[method](id,...args);});}
+function nativeCall(method,...args){return new Promise((resolve,reject)=>{const id=crypto.randomUUID();const timer=setTimeout(()=>{pending.delete(id);reject(Error('Request timed out. Please try again.'));},240000);pending.set(id,{resolve,reject,timer});Native[method](id,...args);});}
 async function api(method,path,body={}){
  if(demoSession){
   if(method==='POST'&&path==='/me'){
@@ -107,11 +107,11 @@ function renderReport(){
  if(!report)report={request_id:crypto.randomUUID(),category:'',description:'',eta_days:7,photo:'',location:null};
  $('#content').innerHTML=`<section class="panel"><h2>Report an Issue</h2><form id="report-form">
  <label>Category<select id="category" required><option value="">Select a category</option>${categories.map(c=>`<option ${report.category===c?'selected':''}>${esc(c)}</option>`).join('')}</select></label>
- <label>Image</label><div class="photo-actions"><button type="button" class="secondary" data-action="camera">Capture</button><button type="button" class="secondary" data-action="upload">Upload</button><input type="file" id="image-input" accept="image/jpeg,image/png,image/webp" hidden><input type="file" id="camera-input" accept="image/*" capture="environment" hidden></div>
- ${report.photo?`<div class="photo-box" id="report-photo"><img src="${esc(report.photo)}" alt="Selected issue image"></div><button type="button" class="secondary" data-action="crop">Crop image</button><div class="location-summary"><h3>GPS location</h3><p id="location-status" class="hint" role="status"></p><p id="coordinates" class="hint"></p><div class="photo-actions"><button type="button" class="text-button" id="refresh-location">Use current GPS</button><button type="button" class="text-button" data-action="pick-report">Select GPS on map</button></div></div>`:''}
- <label>Description <span class="optional">(optional)</span><textarea id="description" maxlength="3000" rows="3" placeholder="Add any useful details">${esc(report.description)}</textarea></label>
+ <label>Image or video</label><div class="photo-actions"><button type="button" class="secondary" data-action="camera">Capture</button><button type="button" class="secondary" data-action="upload">Upload</button><input type="file" id="image-input" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime" hidden><input type="file" id="camera-input" accept="image/*" capture="environment" hidden></div>
+ ${report.photo?`<div class="photo-box" id="report-photo">${mediaMarkup(report.photo)}</div>${isVideo(report.photo)?'':'<button type="button" class="secondary" data-action="crop">Crop image</button>'}<div class="location-summary"><h3>GPS location</h3><p id="location-status" class="hint" role="status"></p><p id="coordinates" class="hint"></p><div class="photo-actions"><button type="button" class="text-button" id="refresh-location">Use current GPS</button><button type="button" class="text-button" data-action="pick-report">Select GPS on map</button></div></div>`:''}
+ <p class="hint">Videos: maximum 10 seconds and 10 MB. Saved videos have no audio.</p><label>Description <span class="optional">(optional)</span><textarea id="description" maxlength="3000" rows="3" placeholder="Add any useful details">${esc(report.description)}</textarea></label>
  <label>ETA<select id="eta" required>${[7,14,21,28,60,90].map(d=>`<option value="${d}" ${Number(report.eta_days)===d?'selected':''}>${d%7===0?d/7+' week'+(d===7?'':'s'):d+' days'}${d===7?' (minimum)':''}</option>`).join('')}</select></label><p class="hint">At least one week from submission.</p>
- <p class="hint">${demoSession?'Demo: photos are not scanned or uploaded and last only for this session.':'Photos are sent to our safety screening provider before they are saved.'}</p><p id="report-error" class="error" role="alert"></p><button class="primary full" type="submit" id="submit-report">Submit issue</button></form></section>`;
+ <p class="hint">${demoSession?'Demo: photos and videos are not scanned or uploaded and last only for this session.':'Photos and sampled video frames are screened before saving. Videos are saved without audio. Screening can miss content.'}</p><p id="report-error" class="error" role="alert"></p><button class="primary full" type="submit" id="submit-report">Submit issue</button></form></section>`;
  $('#report-form').onsubmit=submitReport;if($('#refresh-location'))$('#refresh-location').onclick=()=>detectLocation();$('#image-input').onchange=e=>pickWebImage(e.target.files[0],false);$('#camera-input').onchange=e=>pickWebImage(e.target.files[0],false,true);showLocation();
 }
 function closeCrop(){if(cropDialog){cropDialog.remove();cropDialog=null;}}
@@ -183,14 +183,44 @@ function openPicker(purpose){
  };
 }
 function renderPlaceResults(node,places,select){node.innerHTML='';for(const place of places){const b=document.createElement('button');b.type='button';b.className='place-result';b.textContent=locationName(place);b.onclick=()=>{select(place);node.innerHTML='';};node.append(b);}}
-async function selectNativePhoto(camera=false,proof=false){
+function isVideo(value){return typeof value==='string'&&value.startsWith('data:video/');}
+function mediaMarkup(value){
+ return isVideo(value)?'<video class="detail-photo" style="width:100%;max-height:420px" src="'+esc(value)+'" controls muted playsinline preload="metadata"></video>':'<img class="detail-photo" src="'+esc(value)+'" alt="Issue photo">';
+}
+function chooseCapture(proof=false){
+ const dialog=document.createElement('dialog');dialog.innerHTML='<h2>Capture</h2><button type="button" data-kind="photo">Photo</button> <button type="button" data-kind="video">Video (up to 10 seconds)</button> <button type="button" data-kind="cancel">Cancel</button>';
+ document.body.append(dialog);dialog.showModal();dialog.addEventListener('cancel',()=>dialog.remove());
+ dialog.onclick=e=>{
+  const kind=e.target.dataset.kind;if(!kind)return;dialog.remove();if(kind==='cancel')return;
+  if(window.Native){selectNativePhoto(true,proof,kind==='video');return;}
+  const input=document.createElement('input');input.type='file';input.accept=kind==='video'?'video/mp4,video/webm,video/quicktime':'image/*';input.setAttribute('capture','environment');input.hidden=true;
+  input.onchange=()=>{pickWebImage(input.files[0],proof,true);input.remove();};input.oncancel=()=>input.remove();document.body.append(input);input.click();
+ };
+}
+async function pickWebVideo(file,proof,camera){
+ if(!['video/mp4','video/webm','video/quicktime'].includes(file.type)||file.size>10*1024*1024)throw Error('Choose MP4, MOV or WebM under 10 MB.');
+ const target=proof?selected:report,url=URL.createObjectURL(file),video=document.createElement('video');
+ try{
+  await new Promise((resolve,reject)=>{
+   const timer=setTimeout(()=>reject(Error('Cannot read video duration.')),10000);
+   video.preload='metadata';video.onloadedmetadata=()=>{clearTimeout(timer);resolve();};video.onerror=()=>{clearTimeout(timer);reject(Error('This video format cannot be played.'));};video.src=url;
+  });
+  if(!Number.isFinite(video.duration)||video.duration<=0||video.duration>10)throw Error('Video must be 10 seconds or shorter.');
+  const photo=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(Error('Cannot read video.'));r.readAsDataURL(file);});
+  if(proof){if(target===selected){selected.latestPhoto=photo;showLatestPhoto();}}
+  else if(target===report){saveReportFields();report.photo=photo;renderReport();if(camera)await detectLocation();}
+ }finally{video.removeAttribute('src');video.load();URL.revokeObjectURL(url);}
+}
+
+async function selectNativePhoto(camera=false,proof=false,video=false){
  const target=proof?selected:report;
- try{const result=await nativeCall(camera?'capture':'choosePhoto');if(proof){if(target===selected){selected.latestPhoto=result.photo;showLatestPhoto();}}else if(target===report){report.photo=result.photo;renderReport();if(camera)await detectLocation();}}
+ try{const result=await nativeCall(camera?(video?'captureVideo':'capture'):'choosePhoto');if(proof){if(target===selected){selected.latestPhoto=result.photo;showLatestPhoto();}}else if(target===report){report.photo=result.photo;renderReport();if(camera)await detectLocation();}}
  catch(e){toast(e.message);}
 }
 async function pickWebImage(file,proof,camera=false){
  if(!file)return;const target=proof?selected:report;
  try{
+  if(file.type.startsWith('video/')){await pickWebVideo(file,proof,camera);return;}
   if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>10*1024*1024)throw Error('Choose a JPEG, PNG or WebP image under 10 MB.');
   const raw=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(Error('Cannot read image.'));r.readAsDataURL(file);});
   const im=await new Promise((res,rej)=>{const image=new Image();image.onload=()=>res(image);image.onerror=()=>rej(Error('Cannot open image.'));image.src=raw;});
@@ -201,11 +231,11 @@ async function pickWebImage(file,proof,camera=false){
 }
 async function submitReport(event){
  event.preventDefault();if(reportBusy)return;saveReportFields();
- if(!report.photo){$('#report-error').textContent='Upload an image of the issue.';return;}
+ if(!report.photo){$('#report-error').textContent='Capture or upload a photo or video of the issue.';return;}
  if(!categories.includes(report.category)){$('#report-error').textContent='Select a category.';return;}
  if(report.locating||!validLocation(report.location)){$('#report-error').textContent='Use current GPS or select the issue location on the map.';return;}
  const days=Number(report.eta_days);if(!Number.isInteger(days)||days<7){$('#report-error').textContent='ETA must be at least one week.';return;}
- reportBusy=true;$('#submit-report').disabled=true;$('#submit-report').textContent='Submitting…';$('#report-error').textContent='';
+ reportBusy=true;$('#submit-report').disabled=true;$('#submit-report').textContent=demoSession?'Submitting…':'Screening and saving…';$('#report-error').textContent='';
  try{await api('POST','/issues',{...report,...report.location,eta_days:days});report=null;active='issues';issueScope='mine';reporter=null;filters={status:'',category:'',country:'',city:''};renderIssuesPage(false);toast('Issue reported.');}
  catch(e){if($('#report-error'))$('#report-error').textContent=e.message;}finally{reportBusy=false;if($('#submit-report')){$('#submit-report').disabled=false;$('#submit-report').textContent='Submit issue';}}
 }
@@ -263,10 +293,10 @@ async function openIssue(id){
 }
 function renderDetail(){
  const i=selected,canResolve=i.user_id===currentUser.id&&i.resolved===null;
- $('#issue-detail').innerHTML=`<section class="panel detail"><div class="section-heading"><h2>Issue details</h2><button class="text-button" data-action="close-detail">Close</button></div><div id="detail-status">${badge(i)}</div><h3>${esc(i.title||i.category)}</h3><figure><img class="detail-photo" src="${esc(i.photo)}" alt="Original issue photo"><figcaption>Original photo</figcaption></figure>${i.description?`<p class="description">${esc(i.description)}</p>`:'<p class="hint">No description provided.</p>'}<dl><dt>Category</dt><dd>${esc(i.category||'Other')}</dd><dt>Raised by</dt><dd><button class="person" data-action="reporter" data-id="${esc(i.user_id)}" data-name="${esc(i.reporter)}">${esc(i.reporter)}</button></dd>${['country','state','city','street'].map(k=>`<dt>${k==='street'?'Street name':k[0].toUpperCase()+k.slice(1)}</dt><dd>${esc(i[k]||'Not available')}</dd>`).join('')}<dt>GPS location</dt><dd>${Number(i.lat).toFixed(5)}, ${Number(i.lon).toFixed(5)}</dd><dt>Raised on</dt><dd>${stamp(i.created)}</dd><dt>ETA</dt><dd>${stamp(i.deadline)} (${Math.round((i.deadline-i.created)/86400)} days)</dd><dt>${i.resolved!==null?'Time taken':'Elapsed'}</dt><dd id="detail-elapsed">${elapsed(i)}</dd>${i.resolved!==null?`<dt>Resolved on</dt><dd>${stamp(i.resolved)}</dd>`:''}</dl>${i.proofs?.filter(p=>p.accepted).map(p=>`<figure><img class="detail-photo" src="${esc(p.photo)}" alt="Latest issue photo"><figcaption>Latest photo</figcaption></figure>`).join('')||''}${canResolve?`<form id="resolve-form"><h3>Mark as resolved</h3><p class="hint">Confirm the issue has been fixed. A latest photo is optional.</p><div id="latest-photo"></div><button type="button" class="secondary" data-action="upload-proof">Add latest photo (optional)</button><input type="file" id="proof-input" accept="image/jpeg,image/png,image/webp" hidden><p id="resolve-error" class="error" role="alert"></p><button type="submit" class="primary full" id="resolve-submit">Mark as resolved</button></form>`:''}</section>`;
+ $('#issue-detail').innerHTML=`<section class="panel detail"><div class="section-heading"><h2>Issue details</h2><button class="text-button" data-action="close-detail">Close</button></div><div id="detail-status">${badge(i)}</div><h3>${esc(i.title||i.category)}</h3><figure>${mediaMarkup(i.photo)}<figcaption>Original media</figcaption></figure>${i.description?`<p class="description">${esc(i.description)}</p>`:'<p class="hint">No description provided.</p>'}<dl><dt>Category</dt><dd>${esc(i.category||'Other')}</dd><dt>Raised by</dt><dd><button class="person" data-action="reporter" data-id="${esc(i.user_id)}" data-name="${esc(i.reporter)}">${esc(i.reporter)}</button></dd>${['country','state','city','street'].map(k=>`<dt>${k==='street'?'Street name':k[0].toUpperCase()+k.slice(1)}</dt><dd>${esc(i[k]||'Not available')}</dd>`).join('')}<dt>GPS location</dt><dd>${Number(i.lat).toFixed(5)}, ${Number(i.lon).toFixed(5)}</dd><dt>Raised on</dt><dd>${stamp(i.created)}</dd><dt>ETA</dt><dd>${stamp(i.deadline)} (${Math.round((i.deadline-i.created)/86400)} days)</dd><dt>${i.resolved!==null?'Time taken':'Elapsed'}</dt><dd id="detail-elapsed">${elapsed(i)}</dd>${i.resolved!==null?`<dt>Resolved on</dt><dd>${stamp(i.resolved)}</dd>`:''}</dl>${i.proofs?.filter(p=>p.accepted).map(p=>`<figure>${mediaMarkup(p.photo)}<figcaption>Latest media</figcaption></figure>`).join('')||''}${canResolve?`<form id="resolve-form"><h3>Mark as resolved</h3><p class="hint">Confirm the issue has been fixed. A latest photo or video is optional.</p><div id="latest-photo"></div><button type="button" class="secondary" data-action="capture-proof">Capture latest media</button><button type="button" class="secondary" data-action="upload-proof">Upload latest media (optional)</button><input type="file" id="proof-input" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime" hidden><p id="resolve-error" class="error" role="alert"></p><button type="submit" class="primary full" id="resolve-submit">Mark as resolved</button></form>`:''}</section>`;
  if(canResolve){$('#proof-input').onchange=e=>pickWebImage(e.target.files[0],true);$('#resolve-form').onsubmit=resolveIssue;}
 }
-function showLatestPhoto(){if($('#latest-photo'))$('#latest-photo').innerHTML=`<img class="detail-photo" src="${esc(selected.latestPhoto)}" alt="Selected latest photo"><button type="button" class="text-button" data-action="remove-proof">Remove photo</button>`;}
+function showLatestPhoto(){if($('#latest-photo'))$('#latest-photo').innerHTML=`${mediaMarkup(selected.latestPhoto)}<button type="button" class="text-button" data-action="remove-proof">Remove photo</button>`;}
 async function resolveIssue(event){
  event.preventDefault();if(resolveBusy)return;resolveBusy=true;const id=selected.id;$('#resolve-submit').disabled=true;$('#resolve-submit').textContent='Saving…';
  try{const result=await api('POST','/issues/'+id+'/resolve',{photo:selected.latestPhoto||null});issues=issues.map(i=>i.id===id?result:i);if(selected?.id===id){selected=result;renderDetail();}renderCards();toast('Issue marked as resolved.');}
@@ -317,7 +347,8 @@ document.addEventListener('click',async event=>{
  if(['status-all','status-open','status-closed'].includes(action)){filters.status=action==='status-open'?'unresolved':action==='status-closed'?'resolved':'';selected=null;$('#issue-detail').innerHTML='';renderCards();}
  if(action==='retry-list')loadIssues();
  if(action==='clear-filters'){searchText='';filters={status:'',category:'',country:'',city:''};selected=null;renderList();}
- if(action==='upload'||action==='camera'){saveReportFields();if(window.Native)selectNativePhoto(action==='camera');else $(action==='camera'?'#camera-input':'#image-input').click();}
+ if(action==='camera'||action==='capture-proof'){saveReportFields();chooseCapture(action==='capture-proof');}
+ if(action==='upload'){saveReportFields();if(window.Native)selectNativePhoto();else $('#image-input').click();}
  if(action==='crop')openCrop();
  if(action==='detail')openIssue(button.dataset.id);
  if(action==='close-detail'){selected=null;$('#issue-detail').innerHTML='';renderCards();}

@@ -28,7 +28,7 @@ public class MainActivity extends Activity {
         if(state!=null){captureId=state.getString("captureId"); String f=state.getString("captureFile"); if(f!=null)captureFile=new File(f);captureTime=state.getLong("captureTime");}
         web=new WebView(this); setContentView(web);
         web.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets.consumeSystemWindowInsets();});
-        WebSettings s=web.getSettings(); s.setJavaScriptEnabled(true); s.setUserAgentString(s.getUserAgentString()+" CivicFix/0.3.0 (com.civicfix.app)"); s.setDomStorageEnabled(true); s.setAllowFileAccess(false); s.setAllowContentAccess(false); s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        WebSettings s=web.getSettings(); s.setJavaScriptEnabled(true); s.setUserAgentString(s.getUserAgentString()+" NenuSaitham/0.5.0 (com.civicfix.app)"); s.setDomStorageEnabled(true); s.setAllowFileAccess(false); s.setAllowContentAccess(false); s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         web.setWebChromeClient(new WebChromeClient());
         web.addJavascriptInterface(new Bridge(),"Native");
         web.setWebViewClient(new WebViewClient(){
@@ -68,7 +68,7 @@ public class MainActivity extends Activity {
             try{
                 if(!path.startsWith("/") || path.startsWith("//") || path.contains("..") || !(method.equals("GET")||method.equals("POST")))throw new Exception("Invalid request");
                 String server=prefs.getString("server","");if(server.isEmpty())throw new Exception("Set the server address under Server connection first.");
-                c=(HttpURLConnection)new URL(server+path).openConnection();c.setInstanceFollowRedirects(false);c.setConnectTimeout(15000);c.setReadTimeout(140000);c.setRequestMethod(method);
+                c=(HttpURLConnection)new URL(server+path).openConnection();c.setInstanceFollowRedirects(false);c.setConnectTimeout(15000);c.setReadTimeout(230000);c.setRequestMethod(method);
                 c.setRequestProperty("Authorization","Bearer "+prefs.getString("token",""));
                 if(method.equals("POST")){c.setDoOutput(true);c.setRequestProperty("Content-Type","application/json");try(OutputStream out=c.getOutputStream()){out.write(body.getBytes(StandardCharsets.UTF_8));}}
                 int status=c.getResponseCode();InputStream stream=status>=400?c.getErrorStream():c.getInputStream();
@@ -90,12 +90,21 @@ public class MainActivity extends Activity {
                 intent.setClipData(ClipData.newRawUri("Capture",uri));startActivityForResult(intent,90);
             }catch(Exception e){captureId=null;reply(id,null,"Camera unavailable on this device.");}
         });}
+        @JavascriptInterface public void captureVideo(String id){main.post(()->{
+            if(captureId!=null){reply(id,null,"Media picker is already open");return;}
+            captureId=id;captureTime=System.currentTimeMillis();captureFile=null;
+            try{startActivityForResult(new Intent(MediaStore.ACTION_VIDEO_CAPTURE)
+                .putExtra(MediaStore.EXTRA_DURATION_LIMIT,10)
+                .putExtra(MediaStore.EXTRA_SIZE_LIMIT,10L*1024*1024)
+                .putExtra(MediaStore.EXTRA_VIDEO_QUALITY,0),93);
+            }catch(Exception e){captureId=null;reply(id,null,"Video camera unavailable.");}
+        });}
         @JavascriptInterface public void choosePhoto(String id){main.post(()->{
             if(captureId!=null){reply(id,null,"Photo picker is already open");return;}
             captureId=id; captureTime=System.currentTimeMillis(); captureFile=null;
             try{
-                Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*");
-                pick.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"image/jpeg","image/png","image/webp"});
+                Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*");
+                pick.putExtra(Intent.EXTRA_MIME_TYPES,new String[]{"image/jpeg","image/png","image/webp","video/mp4","video/webm","video/quicktime"});
                 startActivityForResult(pick,92);
             }catch(Exception e){captureId=null;reply(id,null,"Photo picker unavailable. Please use the camera.");}
         });}
@@ -158,11 +167,11 @@ public class MainActivity extends Activity {
     void stopLocation(){if(lm!=null&&listener!=null)lm.removeUpdates(listener);listener=null;}
     @Override public void onRequestPermissionsResult(int req,String[] permissions,int[] grants){super.onRequestPermissionsResult(req,permissions,grants);if(req==91){if(checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED)locate();else{reply(locationId,null,"Location permission denied. Enable location access and retry.");locationId=null;}}}
     @Override protected void onActivityResult(int req,int result,Intent data){
-        super.onActivityResult(req,result,data);if(req!=90&&req!=92)return;
-        if(req==92){
+        super.onActivityResult(req,result,data);if(req!=90&&req!=92&&req!=93)return;
+        if(req==92||req==93){
             final String pickerId=captureId;captureId=null;
-            if(result!=RESULT_OK||data==null||data.getData()==null){reply(pickerId,null,"No image selected");return;}
-            final Uri picked=data.getData();final long pickedTime=captureTime;
+            if(result!=RESULT_OK||data==null||data.getData()==null){reply(pickerId,null,"No media selected");return;}
+            final Uri picked=data.getData();final long pickedTime=captureTime;final String mime=getContentResolver().getType(picked);final boolean video=req==93||(mime!=null&&mime.startsWith("video/"));
             io.execute(()->{
                 File file=null;
                 try{
@@ -171,13 +180,27 @@ public class MainActivity extends Activity {
                         if(in==null)throw new IOException();byte[] buffer=new byte[8192];int n,total=0;
                         while((n=in.read(buffer))!=-1){total+=n;if(total>10*1024*1024)throw new IOException();out.write(buffer,0,n);}
                     }
-                    encodePhoto(pickerId,file,pickedTime);
-                }catch(Exception e){if(file!=null)file.delete();reply(pickerId,null,"Choose a JPEG, PNG or WebP photo under 10 MB.");}
+                    if(video)encodeVideo(pickerId,file,pickedTime,mime);else encodePhoto(pickerId,file,pickedTime);
+                }catch(Exception e){if(file!=null)file.delete();reply(pickerId,null,"Choose a supported photo or video under 10 MB.");}
             });return;
         }
         final String id=captureId;final File f=captureFile;final long time=captureTime;captureId=null;
         if(result!=RESULT_OK){if(f!=null)f.delete();reply(id,null,"Camera cancelled");return;}
         io.execute(()->encodePhoto(id,f,time));
+    }
+    void encodeVideo(String id,File file,long time,String mime){
+        android.media.MediaMetadataRetriever reader=new android.media.MediaMetadataRetriever();
+        try{
+            if(file.length()>10*1024*1024)throw new IOException();
+            reader.setDataSource(file.getAbsolutePath());
+            long duration=Long.parseLong(reader.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION));
+            if(duration<=0||duration>10000)throw new IOException();
+            if(!Arrays.asList("video/mp4","video/webm","video/quicktime").contains(mime))mime="video/mp4";
+            byte[] bytes=java.nio.file.Files.readAllBytes(file.toPath());
+            JSONObject j=new JSONObject();j.put("photo","data:"+mime+";base64,"+Base64.encodeToString(bytes,Base64.NO_WRAP));j.put("captured",time/1000d);
+            reply(id,j,null);
+        }catch(Exception e){reply(id,null,"Choose a readable video up to 10 seconds and under 10 MB.");}
+        finally{try{reader.release();}catch(Exception ignored){}file.delete();}
     }
     void encodePhoto(String id,File f,long time){
         try{
