@@ -393,12 +393,12 @@ def application(env,start_response):
     try:
         from urllib.parse import parse_qs
         method=env['REQUEST_METHOD']; path=env.get('PATH_INFO',''); body={}
-        if method=='GET' and path in ('/','/index.html','/app.js','/style.css','/leaflet.js','/leaflet.css'):
+        if method=='GET' and path in ('/','/index.html','/app.js','/style.css','/leaflet.js','/leaflet.css','/torch-logo.jpg'):
             name='index.html' if path=='/' else path[1:]
             asset=Path(__file__).parent.parent/'android/app/src/main/assets'/name
             if not asset.is_file(): raise ApiError('Web assets are not installed.',404)
-            payload=asset.read_bytes(); mime={'html':'text/html','js':'application/javascript','css':'text/css'}[name.rsplit('.',1)[-1]]
-            start_response('200 OK',[('Content-Type',mime+'; charset=utf-8'),('Content-Length',str(len(payload))),('Cache-Control','no-store'),('X-Content-Type-Options','nosniff')])
+            payload=asset.read_bytes(); mime={'html':'text/html','js':'application/javascript','css':'text/css','jpg':'image/jpeg'}[name.rsplit('.',1)[-1]]
+            start_response('200 OK',[('Content-Type',mime+('' if mime=='image/jpeg' else '; charset=utf-8')),('Content-Length',str(len(payload))),('Cache-Control','no-store'),('X-Content-Type-Options','nosniff')])
             return [payload]
         length=int(env.get('CONTENT_LENGTH') or 0)
         if length<0 or length>15_000_000: raise ApiError('Upload too large',413)

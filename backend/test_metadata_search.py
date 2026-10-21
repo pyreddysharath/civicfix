@@ -33,3 +33,11 @@ class MetadataSearchTests(unittest.TestCase):
         self.assertEqual(self.call('GET','/issues/count')['total'],0)
         self.report()
         self.assertEqual(self.call('GET','/issues/count',query={'lat':'0','lon':'0','radius':'3'})['total'],1)
+
+    def test_brand_asset_served_as_image(self):
+        import server, io
+        responses=[]
+        body=b''.join(server.application({'REQUEST_METHOD':'GET','PATH_INFO':'/torch-logo.jpg','wsgi.input':io.BytesIO(b'')},lambda status,headers: responses.append((status,dict(headers)))))
+        self.assertEqual(responses[0][0],'200 OK')
+        self.assertEqual(responses[0][1]['Content-Type'],'image/jpeg')
+        self.assertTrue(body.startswith(b'\xff\xd8\xff'))
