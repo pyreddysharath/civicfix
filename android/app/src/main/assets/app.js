@@ -10,6 +10,7 @@ let verifiedEmail='',verificationToken='',otpEmail='',resendAt=0,authBusy=false,
 const categories=['Roads & Potholes','Electricity','Street Lighting','Cleaning & Waste','Drainage & Sewage','Water Supply','Construction & Debris','Footpaths & Accessibility','Parks & Public Spaces','Traffic Signs & Signals','Other'];
 let issueScope='all',searchCenter=null,searchRadius=3,searchText='',locationPromise=null,locationVersion=0,screenVersion=0;
 let picker=null,fieldQuery='',searchLocationVersion=0;
+let searchWorldwide=false,locationChoice='current',headerLocating=false;
 let filters={status:'',category:'',country:'',city:''};
 let webToken=sessionStorage.getItem('civicfix-session')||'';
 window.nativeReply=(id,result,error)=>{const p=pending.get(id);if(!p)return;clearTimeout(p.timer);pending.delete(id);error?p.reject(Error(error)):p.resolve(result);};
@@ -20,6 +21,7 @@ async function api(method,path,body={}){
    const name=String(body.name||'').trim();if(!name||name.length>80)throw Error('Enter a name (maximum 80 characters).');
    currentUser={...currentUser,name,username:body.email||currentUser.username||''};demoIssues.forEach(i=>{if(i.user_id===currentUser.id)i.reporter=name;});return {...currentUser};
   }
+  if(method==='GET'&&path==='/issues/count')return {total:demoIssues.length};
   if(method==='GET'&&path.startsWith('/issues?')){
    const q=new URLSearchParams(path.split('?')[1]);let items=demoIssues.filter(i=>(q.get('mine')!=='1'||i.user_id===currentUser.id)&&(!q.get('reporter_id')||i.user_id===q.get('reporter_id')));
    if(q.has('lat')){const lat=Number(q.get('lat')),lon=Number(q.get('lon')),radius=Number(q.get('radius'));items=items.filter(i=>kmBetween(lat,lon,i.lat,i.lon)<=radius).sort((a,b)=>kmBetween(lat,lon,a.lat,a.lon)-kmBetween(lat,lon,b.lat,b.lon));}
@@ -54,8 +56,13 @@ function badge(i){const s=status(i);return `<span class="badge ${s}"><i></i>${la
 function stamp(t){return new Date(t*1000).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'});}
 function elapsed(i){const seconds=Math.max(0,(i.resolved??Date.now()/1000)-i.created);const days=Math.floor(seconds/86400),hours=Math.floor(seconds%86400/3600);return days?`${days}d ${hours}h`:hours?`${hours}h ${Math.floor(seconds%3600/60)}m`:`${Math.floor(seconds/60)}m`;}
 function initial(){return Array.from((currentUser?.name||'User').trim())[0]?.toUpperCase()||'U';}
-function header(){return `<header><a class="brand" href="#" data-action="home"><span class="brand-title" lang="te">నేను సైతం<svg class="title-torch" viewBox="0 0 32 44" role="img" aria-label="Flaming wooden torch"><path d="M13 21h6l-1 21h-4z" fill="#82502d"/><path d="M16 24v15" stroke="#c89557" stroke-width="2"/><path d="M10 20h12l-2 7h-8z" fill="#583722"/><path d="M16 1c2 9 10 10 10 17a10 10 0 0 1-20 0c0-5 4-8 5-12 0 5 2 7 3 8 3-4 4-7 2-13z" fill="#e96a20"/><path d="M17 12c0 5-6 6-6 10a5 5 0 0 0 10 0c0-4-3-6-4-10z" fill="#ffd15b"/></svg></span><span class="brand-meaning" lang="en">I, too</span></a>${currentUser?`<div class="header-actions"><button class="avatar" data-action="profile" aria-label="Edit profile for ${esc(currentUser.name)}">${esc(initial())}</button></div>`:''}</header>`;}
-function shell(html){closePicker();screenVersion++;$('#app').innerHTML=header()+`<main>${html}</main>`;}
+function header(){return `<header>${currentUser?`<button type="button" class="header-location" data-action="header-location" aria-label="Change location">⌖ <span id="header-location-name">${esc(searchCenter?locationName(searchCenter):'Current location')}</span><small>Change ▾</small></button>`:''}<a class="brand" href="#" data-action="home"><span class="brand-title" lang="te">నేను సైతం<svg class="title-torch" viewBox="0 0 32 44" role="img" aria-label="Flaming wooden torch"><path d="M13 21h6l-1 21h-4z" fill="#82502d"/><path d="M16 24v15" stroke="#c89557" stroke-width="2"/><path d="M10 20h12l-2 7h-8z" fill="#583722"/><path d="M16 1c2 9 10 10 10 17a10 10 0 0 1-20 0c0-5 4-8 5-12 0 5 2 7 3 8 3-4 4-7 2-13z" fill="#e96a20"/><path d="M17 12c0 5-6 6-6 10a5 5 0 0 0 10 0c0-4-3-6-4-10z" fill="#ffd15b"/></svg></span><span class="brand-meaning" lang="en">I, too</span></a>${currentUser?`<div class="header-actions"><button class="avatar" data-action="profile" aria-label="Edit profile for ${esc(currentUser.name)}">${esc(initial())}</button></div>`:''}</header>`;}
+function shell(html){closePicker();screenVersion++;$('#app').innerHTML=header()+`<main>${html}</main>`;alignFields();if(currentUser&&!searchCenter&&!headerLocating)locateHeader();}
+function alignFields(root=document){
+ root.querySelectorAll('label:not(.field-row)').forEach(label=>{const control=label.querySelector('input:not([type=radio]):not([type=checkbox]),select,textarea');if(!control||control.parentElement!==label)return;const title=document.createElement('span'),body=document.createElement('span');title.className='field-label';body.className='field-control';while(label.firstChild&&label.firstChild!==control)title.append(label.firstChild);while(label.firstChild)body.append(label.firstChild);label.append(title,body);label.classList.add('field-row');});
+}
+function updateHeaderLocation(){if(!globalThis.document)return;const node=$('#header-location-name');if(node)node.textContent=searchCenter?locationName(searchCenter):'Choose location';}
+async function locateHeader(){headerLocating=true;const request=searchLocationVersion,user=currentUser;try{const l=await currentLocation();if(user!==currentUser||request!==searchLocationVersion)return;searchCenter=l;updateHeaderLocation();}catch{updateHeaderLocation();}finally{headerLocating=false;}}
 function authPage(){
  currentUser=null;report=null;selected=null;issues=[];listVersion++;
  shell(`<section class="panel auth"><h1>${mode==='register'?'Create an account':'Welcome back'}</h1><p class="subtle">${mode==='register'?'Verify your email to get started.':'Log in to report and track local issues.'}</p>
@@ -108,7 +115,7 @@ function renderReport(){
  if(!report)report={request_id:crypto.randomUUID(),category:'',description:'',eta_days:7,photo:'',location:null};
  $('#content').innerHTML=`<section class="panel"><h2>Report an Issue</h2><form id="report-form">
  <label>Category<select id="category" required><option value="">Select a category</option>${categories.map(c=>`<option ${report.category===c?'selected':''}>${esc(c)}</option>`).join('')}</select></label>
- <label>Image or video</label><div class="photo-actions"><button type="button" class="secondary" data-action="camera">Capture</button><button type="button" class="secondary" data-action="upload">Upload</button><input type="file" id="image-input" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime" hidden><input type="file" id="camera-input" accept="image/*" capture="environment" hidden></div>
+ <div class="media-field"><span class="field-label">Image or video</span><div class="photo-actions"><button type="button" class="secondary" data-action="camera">Capture</button><button type="button" class="secondary" data-action="upload">Upload</button><input type="file" id="image-input" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime" hidden><input type="file" id="camera-input" accept="image/*" capture="environment" hidden></div></div>
  ${report.photo?`<div class="photo-box" id="report-photo">${mediaMarkup(report.photo,"report")}</div><div class="location-summary"><h3>GPS location</h3><p id="location-status" class="hint" role="status"></p><p id="coordinates" class="hint"></p><div class="photo-actions"><button type="button" class="text-button" id="refresh-location">Use current GPS</button><button type="button" class="text-button" data-action="pick-report">Select GPS on map</button></div></div>`:''}
  <p class="hint">Videos: maximum 10 seconds and 10 MB. Saved videos have no audio.</p><label>Description <span class="optional">(optional)</span><textarea id="description" maxlength="3000" rows="3" placeholder="Add any useful details">${esc(report.description)}</textarea></label>
  <label>ETA<select id="eta" required>${[7,14,21,28,60,90].map(d=>`<option value="${d}" ${Number(report.eta_days)===d?'selected':''}>${d%7===0?d/7+' week'+(d===7?'':'s'):d+' days'}${d===7?' (minimum)':''}</option>`).join('')}</select></label><p class="hint">At least one week from submission.</p>
@@ -149,7 +156,7 @@ function openPicker(purpose){
  saveReportFields();closePicker();const target=purpose==='report'?report:null;
  const seed=(target?.location)||searchCenter;const dialog=document.createElement('dialog');dialog.className='map-dialog';
  dialog.innerHTML=`<div class="section-heading"><h2>Select ${purpose==='report'?'issue location':'search area'}</h2><button class="text-button" id="close-map" aria-label="Close map">✕</button></div><form id="map-search"><label>City, street or coordinates<input id="map-query" maxlength="200" placeholder="Search a place or latitude, longitude"></label><button class="secondary" type="submit">Search</button></form><div id="map-results"></div><p class="hint">Tap the map to place a pin. Drag to move; use + and − to zoom.</p><div id="picker-map" role="region" aria-label="Location selection map"></div><p id="map-status" class="hint" role="status">${validLocation(seed)?esc(locationName(seed)):'Select a point to continue.'}</p><button class="primary full" id="use-map" ${validLocation(seed)?'':'disabled'}>Use this location</button><p class="hint">Maps: OpenStreetMap. Viewing maps shares the viewed area with the tile provider. <a href="https://osmfoundation.org/wiki/Privacy_Policy" target="_blank" rel="noopener">Privacy</a></p>`;
- document.body.append(dialog);const state=picker={purpose,target,dialog,chosen:validLocation(seed)?{...seed}:null,map:null,restoreFocus:document.activeElement,version:0};
+ document.body.append(dialog);alignFields(dialog);const state=picker={purpose,target,dialog,chosen:validLocation(seed)?{...seed}:null,map:null,restoreFocus:document.activeElement,version:0};
  dialog.showModal();dialog.oncancel=e=>{e.preventDefault();closePicker();};$('#close-map').onclick=closePicker;
  if(window.L){
   const map=state.map=L.map('picker-map',{worldCopyJump:true}).setView(validLocation(seed)?[seed.lat,seed.lon]:[20,0],validLocation(seed)?14:2);
@@ -168,7 +175,7 @@ function openPicker(purpose){
   let address={};if(window.Native)try{address=await nativeCall('reverseGeocode',point.lat,point.lon);}catch{}
   if(picker!==state)return;const chosen={...point,...address,lat:point.lat,lon:point.lon,accuracy:0,source:'map',captured:Date.now()/1000};closePicker();
   if(purpose==='report'&&report===target){locationVersion++;target.locating=false;target.location=chosen;target.locationError='';showLocation();}
-  else if(purpose==='search'){searchCenter=chosen;searchLocationVersion++;renderIssuesPage(false);}
+  else if(purpose==='search'||purpose==='header'){searchCenter=chosen;searchLocationVersion++;searchWorldwide=false;updateHeaderLocation();if(active==='issues')renderIssuesPage(false);}
  };
 }
 function renderPlaceResults(node,places,select){node.innerHTML='';for(const place of places){const b=document.createElement('button');b.type='button';b.className='place-result';b.textContent=locationName(place);b.onclick=()=>{select(place);node.innerHTML='';};node.append(b);}}
@@ -258,39 +265,42 @@ async function submitReport(event){
  try{await api('POST','/issues',{...report,...report.location,eta_days:days,media_metadata:{...report.media_metadata,area:report.location?.area,district:report.location?.district,postcode:report.location?.postcode}});report=null;active='issues';issueScope='mine';reporter=null;filters={status:'',category:'',country:'',city:''};renderIssuesPage(false);toast('Issue reported.');}
  catch(e){if($('#report-error'))$('#report-error').textContent=e.message;}finally{reportBusy=false;if($('#submit-report')){$('#submit-report').disabled=false;$('#submit-report').textContent='Submit issue';}}
 }
+function updateLocationToggles(){if(!$('#near-me'))return;$('#near-me').setAttribute('aria-pressed',String(locationChoice==='current'));$('[data-action=search-place]').setAttribute('aria-pressed',String(locationChoice==='place'));$('[data-action=pick-search]').setAttribute('aria-pressed',String(locationChoice==='map'));$('#location-search-controls').hidden=locationChoice!=='place';}
 function renderIssuesPage(autoLocate=true){
- active='issues';shell(`<div class="section-heading"><h1>Issues</h1><button class="text-button" data-action="home">Home</button></div><div class="scope-buttons"><button data-action="scope-mine" class="${issueScope==='mine'?'primary':'secondary'}" aria-pressed="${issueScope==='mine'}">My reported Issues</button><button data-action="scope-all" class="${issueScope==='all'?'primary':'secondary'}" aria-pressed="${issueScope==='all'}">Search Issues</button></div>
- ${issueScope==='all'?`<section class="panel search-panel"><h2>Choose a location</h2><div class="location-options"><button type="button" class="secondary" id="near-me">Use current location</button><button type="button" class="secondary" data-action="search-place" aria-expanded="false">Search a place</button><button type="button" class="secondary" data-action="pick-search">Select on map</button></div><div id="location-search-controls" hidden><form id="area-search"><label>Search city, street or area<input id="area-query" maxlength="200" placeholder="Enter a place or latitude, longitude"></label><button type="submit" class="secondary">Search</button></form><div id="area-results"></div></div><p id="area-status" class="hint" role="status">${searchCenter?esc(locationName(searchCenter)):'Finding your current location…'}</p><div ><label>Distance (km)<input id="radius" type="number" min="0.1" max="200" step="0.1" value="${searchRadius}" inputmode="decimal"></label><p class="hint">Issues within this radius of the selected location. Default: 3 km.</p></div></section>`:''}<div id="content"></div>${demoSession?'<p class="hint demo-note">Demo mode · Only reports created in this session are available.</p>':''}`);
+ active='issues';const searchBody=issueScope==='all'?`<section class="panel search-panel"><button type="button" class="worldwide-count secondary full" data-action="worldwide" aria-expanded="${searchWorldwide}">Worldwide issues: <strong id="worldwide-total">…</strong></button><h2>Choose a location</h2><div class="location-options"><button type="button" class="location-toggle" aria-pressed="${locationChoice==='current'}" id="near-me">Use current location</button><button type="button" class="location-toggle" data-action="search-place" aria-pressed="${locationChoice==='place'}">Search a place</button><button type="button" class="location-toggle" data-action="pick-search" aria-pressed="${locationChoice==='map'}">Select on map</button></div><div id="location-search-controls" ${locationChoice==='place'?'':'hidden'}><form id="area-search"><label>Search city, street or area<input id="area-query" maxlength="200" placeholder="Enter a place or latitude, longitude"></label><button type="submit" class="secondary">Search</button></form><div id="area-results"></div></div><p id="area-status" class="hint" role="status">${searchCenter?esc(locationName(searchCenter)):'Finding your current location…'}</p><div ><label>Distance (km)<input id="radius" type="number" min="0.1" max="200" step="0.1" value="${searchRadius}" inputmode="decimal"></label><p class="hint">Issues within this radius of the selected location. Default: 3 km.</p></div></section><div id="content"></div>`:'';
+ shell(`<div class="section-heading"><h1>Issues</h1><button class="text-button" data-action="home">Home</button></div><details id="my-issues-section" class="issue-section" ${issueScope!=='all'?'open':''}><summary data-action="scope-mine">My reported issues</summary>${issueScope!=='all'?'<div id="content"></div>':''}</details><details id="search-issues-section" class="issue-section" ${issueScope==='all'?'open':''}><summary data-action="scope-all">Search Issues</summary>${searchBody}</details>${demoSession?'<p class="hint demo-note">Demo mode · Only reports created in this session are available.</p>':''}`);
  const version=screenVersion;let areaVersion=0;
  if(issueScope==='all'){
-  $('#radius').onchange=e=>{const value=Number(e.target.value);if(!Number.isFinite(value)||value<.1||value>200){toast('Choose a distance between 0.1 and 200 km.');e.target.value=searchRadius;return;}searchRadius=value;loadIssues();};
-  $('#near-me').onclick=locateIssues;
+  api('GET','/issues/count').then(data=>{if(screenVersion===version&&$('#worldwide-total'))$('#worldwide-total').textContent=data.total;}).catch(()=>{if(screenVersion===version&&$('#worldwide-total'))$('#worldwide-total').textContent='Unavailable';});
+  $('#radius').onchange=e=>{const value=Number(e.target.value);if(!Number.isFinite(value)||value<.1||value>200){toast('Choose a distance between 0.1 and 200 km.');e.target.value=searchRadius;return;}searchRadius=value;searchWorldwide=false;loadIssues();};
+  $('#near-me').onclick=()=>{locationChoice='current';searchWorldwide=false;updateLocationToggles();locateIssues();};
   keywordInput($('#area-query'),'',(query,removed)=>{if(removed){$('#area-results').innerHTML='';if(query)$('#area-search').requestSubmit();else{$('#area-status').textContent=searchCenter?locationName(searchCenter):'Choose a location.';}}});
-  $('#area-search').onsubmit=async e=>{e.preventDefault();const query=$('#area-query').commitKeywords(),request=++areaVersion;$('#area-status').textContent='Searching…';try{const places=await searchPlaces(query);if(screenVersion!==version||request!==areaVersion)return;renderPlaceResults($('#area-results'),places,l=>{searchCenter={...l,source:'map'};searchLocationVersion++;$('#area-status').textContent=locationName(l);loadIssues();});$('#area-status').textContent=places.length?'Choose a place below.':'No places found. Try the map.';}catch(e){if(screenVersion===version&&request===areaVersion)$('#area-status').textContent=e.message;}};
+  $('#area-search').onsubmit=async e=>{e.preventDefault();const query=$('#area-query').commitKeywords(),request=++areaVersion;$('#area-status').textContent='Searching…';try{const places=await searchPlaces(query);if(screenVersion!==version||request!==areaVersion)return;renderPlaceResults($('#area-results'),places,l=>{searchCenter={...l,source:'map'};searchLocationVersion++;searchWorldwide=false;updateHeaderLocation();$('#area-status').textContent=locationName(l);loadIssues();});$('#area-status').textContent=places.length?'Choose a place below.':'No places found. Try the map.';}catch(e){if(screenVersion===version&&request===areaVersion)$('#area-status').textContent=e.message;}};
  }
- if(issueScope==='all'&&!searchCenter){$('#content').innerHTML='<section class="panel"><p class="empty">Choose a location to see nearby issues.</p></section>';if(autoLocate)locateIssues();}
+ if(issueScope==='all'&&!searchWorldwide&&!searchCenter){$('#content').innerHTML='<section class="panel"><p class="empty">Choose a location to see nearby issues.</p></section>';if(autoLocate)locateIssues();}
  else loadIssues();
 }
 async function locateIssues(){
  const version=screenVersion,request=++searchLocationVersion;if($('#near-me'))$('#near-me').disabled=true;if($('#area-status'))$('#area-status').textContent='Detecting current GPS…';
- try{const l=await currentLocation();if(screenVersion!==version||request!==searchLocationVersion)return;searchCenter=l;$('#area-status').textContent=locationName(l);loadIssues();}
+ try{const l=await currentLocation();if(screenVersion!==version||request!==searchLocationVersion)return;searchCenter=l;updateHeaderLocation();if($('#area-status'))$('#area-status').textContent=locationName(l);loadIssues();}
  catch(e){if(screenVersion===version&&request===searchLocationVersion&&$('#area-status'))$('#area-status').textContent=e.message+' You can select an area on the map.';}
  finally{if(screenVersion===version&&$('#near-me'))$('#near-me').disabled=false;}
 }
 async function loadIssues(){
+ const worldButton=$('[data-action=worldwide]');if(worldButton)worldButton.setAttribute('aria-expanded',String(searchWorldwide));
  const version=++listVersion,screen=screenVersion;selected=null;issues=[];
- if(issueScope==='all'&&!validLocation(searchCenter))return;
+ if(issueScope==='all'&&!searchWorldwide&&!validLocation(searchCenter))return;
  $('#content').innerHTML='<section class="panel"><p role="status">Loading issues…</p></section>';
  try{
-  const query=issueScope==='mine'?{mine:'1'}:reporter?{reporter_id:reporter.id}:{lat:String(searchCenter.lat),lon:String(searchCenter.lon),radius:String(searchRadius)};
+  const query=issueScope==='mine'?{mine:'1'}:reporter?{reporter_id:reporter.id}:searchWorldwide?{}:{lat:String(searchCenter.lat),lon:String(searchCenter.lon),radius:String(searchRadius)};
   let offset=0,all=[];do{const params=new URLSearchParams({limit:'50',offset:String(offset),...query});const data=await api('GET','/issues?'+params);if(version!==listVersion||active!=='issues'||screen!==screenVersion)return;all.push(...data.items);offset=data.next_offset;}while(offset!==null&&offset!==undefined);
   issues=issueScope==='mine'?all.filter(i=>i.user_id===currentUser.id):all;renderList();
  }catch(e){if(version===listVersion&&active==='issues'&&screen===screenVersion)$('#content').innerHTML=`<section class="panel"><p class="error" role="alert">${esc(e.message)}</p><button class="secondary" data-action="retry-list">Retry</button></section>`;}
 }
 function renderList(){
  if(!issues.length){$('#content').innerHTML='<section class="panel"><p class="empty">'+(issueScope==='mine'?'You haven’t reported any issues yet.':'No issues found. Try another location or distance.')+'</p></section><div id="issue-detail"></div>';return;}
- $('#content').innerHTML=`<section class="panel list-panel"><div class="section-heading"><h2>${reporter?'Issues raised by '+esc(reporter.name):issueScope==='mine'?'My reported issues':'Nearby issues'}</h2><button class="text-button" data-action="retry-list">Refresh</button></div><div id="issue-summary"></div><div class="column-filters">${['category','country','city'].map(k=>`<label>${k[0].toUpperCase()+k.slice(1)}<input id="filter-${k}" maxlength="200" placeholder="Enter ${k}" value="${esc(filters[k])}"></label>`).join('')}</div><div id="empty-search-keys"></div><p class="hint" id="result-count" role="status"></p><div id="issues-list"></div></section><div id="issue-detail"></div>`;
- for(const field of ['category','country','city'])keywordInput($('#filter-'+field),filters[field],query=>{filters[field]=query;selected=null;$('#issue-detail').innerHTML='';renderCards();});renderCards();
+ $('#content').innerHTML=`<section class="panel list-panel"><div class="section-heading"><h2>${reporter?'Issues raised by '+esc(reporter.name):issueScope==='mine'?'My reported issues':searchWorldwide?'Worldwide issues':'Nearby issues'}</h2><button class="text-button" data-action="retry-list">Refresh</button></div><div id="issue-summary"></div><div class="column-filters">${['category','country','city'].map(k=>`<label>${k[0].toUpperCase()+k.slice(1)}<input id="filter-${k}" maxlength="200" placeholder="Enter ${k}" value="${esc(filters[k])}"></label>`).join('')}</div><div id="empty-search-keys"></div><p class="hint" id="result-count" role="status"></p><div id="issues-list"></div></section><div id="issue-detail"></div>`;
+ alignFields();for(const field of ['category','country','city'])keywordInput($('#filter-'+field),filters[field],query=>{filters[field]=query;selected=null;$('#issue-detail').innerHTML='';renderCards();});renderCards();
 }
 function renderCards(){
  if(!$('#issues-list'))return;
@@ -371,10 +381,12 @@ document.addEventListener('click',async event=>{
  if(action==='home'){if(!currentUser)return;saveReportFields();active='home';listVersion++;selected=null;landing();}
  if(action==='report'){if(!currentUser)return;saveReportFields();active='report';selected=null;landing();}
  if(action==='issues'){saveReportFields();reporter=null;issueScope='mine';searchText='';filters={status:'',category:'',country:'',city:''};renderIssuesPage();}
- if(action==='scope-mine'||action==='scope-all'){reporter=null;issueScope=action==='scope-mine'?'mine':'all';searchText='';filters={status:'',category:'',country:'',city:''};renderIssuesPage();}
+ if(action==='scope-mine'||action==='scope-all'){if((action==='scope-all')===(issueScope==='all')){button.parentElement.open=!button.parentElement.open;return;}reporter=null;issueScope=action==='scope-mine'?'mine':'all';searchText='';filters={status:'',category:'',country:'',city:''};renderIssuesPage();}
  if(action==='pick-report')openPicker('report');
- if(action==='pick-search')openPicker('search');
- if(action==='search-place'){const controls=$('#location-search-controls');controls.hidden=!controls.hidden;button.setAttribute('aria-expanded',String(!controls.hidden));if(!controls.hidden)$('#area-query').focus();}
+ if(action==='pick-search'){locationChoice='map';updateLocationToggles();openPicker('search');}
+ if(action==='header-location')openPicker('header');
+ if(action==='worldwide'){searchWorldwide=!searchWorldwide;filters={status:'',category:'',country:'',city:''};button.setAttribute('aria-expanded',String(searchWorldwide));if(searchWorldwide||searchCenter)loadIssues();else locateIssues();}
+ if(action==='search-place'){locationChoice='place';updateLocationToggles();$('#area-query').focus();}
  if(action==='profile'){saveReportFields();renderProfile();}
  if(['status-all','status-open','status-closed'].includes(action)){filters.status=action==='status-open'?'unresolved':action==='status-closed'?'resolved':'';selected=null;$('#issue-detail').innerHTML='';renderCards();}
  if(action==='retry-list')loadIssues();
@@ -392,3 +404,5 @@ window.appBack=()=>{const info=$('.media-dialog');if(info){info.remove();return;
 let lastTimeSignature='';
 setInterval(()=>{if(active==='issues'&&currentUser){const signature=issues.map(i=>status(i)+elapsed(i)).join('|');if(signature!==lastTimeSignature){renderCards();lastTimeSignature=signature;}if(selected?.deadline&&$('#detail-status')){$('#detail-status').innerHTML=badge(selected);$('#detail-elapsed').textContent=elapsed(selected);}}},1000);
 (async()=>{if(!DEMO_LOGIN&&(config.user?.id||webToken)){shell('<section class="panel"><p role="status">Signing in…</p></section>');try{currentUser=await api('GET','/me');landing();return;}catch{if(window.Native)Native.logout();webToken='';sessionStorage.removeItem('civicfix-session');}}authPage();})();
+
+new MutationObserver(()=>alignFields()).observe($('#app'),{childList:true,subtree:true});

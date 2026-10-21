@@ -36,10 +36,10 @@ function setup(demo=true){
 (async()=>{
  let t=setup();const {w,$,click,fill,submit}=t;
  try{
-  await click('#auth-submit');assert($('.report-entry'));assert.equal($('.report-entry').textContent,'Report and issue');assert.equal($('.issues-entry').textContent,'Reported issues');assert($('.home-actions'));assert(!$('#report-form'));assert.equal(t.gps(),0);assert.equal($('.avatar').textContent,'D');
+  await click('#auth-submit');assert($('.report-entry'));assert.equal($('.report-entry').textContent,'Report and issue');assert.equal($('.issues-entry').textContent,'Reported issues');assert($('.home-actions'));assert(!$('#report-form'));assert.equal(t.gps(),1);assert($('[data-action="header-location"]'));assert.equal($('.avatar').textContent,'D');
   await click('[data-action="report"]');assert($('#report-form'));assert(!$('#title'));assert(!$('#report-photo'));assert(!$('#refresh-location'));assert(!$('.required'));assert(!$('.welcome'));
-  assert.deepEqual([...$('#report-form').querySelectorAll('select,textarea')].map(x=>x.id),['category','description','eta']);assert.equal($('#eta').value,'7');
-  fill('#category','Roads & Potholes');await click('[data-action="camera"]');await click('[data-kind="photo"]');await pause();assert.equal(t.gps(),1);assert.match($('#coordinates').textContent,/17.40000/);
+  assert($('#category').closest('.field-row'));assert($('#category').closest('.field-control'));assert.deepEqual([...$('#report-form').querySelectorAll('select,textarea')].map(x=>x.id),['category','description','eta']);assert.equal($('#eta').value,'7');
+  fill('#category','Roads & Potholes');await click('[data-action="camera"]');await click('[data-kind="photo"]');await pause();assert.equal(t.gps(),2);assert.match($('#coordinates').textContent,/17.40000/);
   assert.match($('#location-status').textContent,/City: Hyderabad/);assert(!$('[data-action="crop"]'));assert($('.title-torch'));
   await click('[data-action="media-info"]');assert.match($('.media-dialog').textContent,/road.jpg/);assert.match($('.media-dialog').textContent,/1200/);await click('[aria-label="Close media details"]');
   await submit('#report-form');assert.equal($('.stat.total strong').textContent,'1');assert.equal($('.stat.open strong').textContent,'1');assert.equal(t.requests.length,0);assert($('.stat.closed').disabled);const before=$('#issues-list');await click('[data-action="status-closed"]');assert.equal($('#issues-list'),before);assert(!$('#show-all'));assert(!$('.pie-chart'));
@@ -48,17 +48,18 @@ function setup(demo=true){
   await click('[data-action="home"]');await click('[data-action="profile"]');fill('#profile-name','Sharath');fill('#profile-email','demo@example.com');await submit('#profile-form');assert.equal($('.avatar').textContent,'S');
   // Seed issues in both sides of the 3km boundary; all remain isolated to demo memory.
   w.testState.seed();
-  await click('[data-action="issues"]');assert(!$('#radius'));assert.equal($('.stat.total strong').textContent,'4');assert(!$('#filter-status'));assert(!$('#filter-street'));assert(!$('#issue-query'));
+  await click('[data-action="issues"]');assert(!$('#radius'));assert(!$('#search-issues-section').open);assert($('#my-issues-section').open);assert.equal($('[data-action=scope-all]').tagName,'SUMMARY');assert.equal($('.stat.total strong').textContent,'4');assert(!$('#filter-status'));assert(!$('#filter-street'));assert(!$('#issue-query'));
   await click('[data-action="status-open"]');assert.equal(w.document.querySelectorAll('.issues-table tbody tr').length,3);assert.equal($('.stat.total strong').textContent,'4');assert(!$('#show-all'));
   await click('[data-action="status-closed"]');assert.equal(w.document.querySelectorAll('.issues-table tbody tr').length,1);await click('[data-action="status-all"]');assert.equal(w.document.querySelectorAll('.issues-table tbody tr').length,4);
   await click('[data-action="scope-all"]');await pause();assert(!$('[name="search-mode"]'));assert.equal($('#radius').value,'3');assert.equal($('.stat.total strong').textContent,'3');assert.equal($('.stat.open strong').textContent,'2');assert.equal($('.stat.closed strong').textContent,'1');assert(!$('.pie-chart'));
+  assert.equal($('#worldwide-total').textContent,'4');await click('[data-action=worldwide]');assert.equal($('.stat.total strong').textContent,'4');assert.match($('.list-panel h2').textContent,/Worldwide/);fill('#filter-city','hyderabad');assert.equal($('#worldwide-total').textContent,'4');await click('[data-action=worldwide]');assert.equal($('.stat.total strong').textContent,'3');
   fill('#radius','5');$('#radius').dispatchEvent(new w.Event('change'));await pause();assert.equal($('.stat.total strong').textContent,'4');
   fill('#radius','0');$('#radius').dispatchEvent(new w.Event('change'));assert.equal($('#radius').value,'5');
   fill('#filter-category','not found');assert(!$('.pie-chart'));assert(!$('.summary-stats'));assert($('.column-filters').hidden);assert($('#empty-search-keys .keyword-chip'));fill('#filter-category','');
   fill('#filter-category','potholes roads');assert.equal($('.stat.total strong').textContent,'4');assert.equal($('#filter-category').parentElement.querySelectorAll('.keyword-chip').length,2);
   $('#filter-category').parentElement.querySelector('.keyword-chip').click();assert.equal($('.stat.total strong').textContent,'4');fill('#filter-category','');
   await click('[data-action="pick-search"]');assert($('#picker-map'));w.testState.point(0,0);await click('#use-map');assert(!w.document.querySelector('dialog'));assert(!$('.pie-chart'));assert(!$('.summary-stats'));
-  assert($('#location-search-controls').hidden);await click('[data-action="search-place"]');assert(!$('#location-search-controls').hidden);fill('#area-query','London');await submit('#area-search');await click('.place-result');assert.match($('#area-status').textContent,/London/);
+  assert.equal($('[data-action=pick-search]').getAttribute('aria-pressed'),'true');assert($('#location-search-controls').hidden);await click('[data-action="search-place"]');assert(!$('#location-search-controls').hidden);fill('#area-query','London');await submit('#area-search');await click('.place-result');assert.match($('#area-status').textContent,/London/);
   await click('[aria-label="Remove london"]');fill('#area-query','0,0');await submit('#area-search');await click('.place-result');assert.match($('#area-status').textContent,/0.00000/);
   await click('[data-action="scope-mine"]');assert(!$('#radius'));assert.equal($('.stat.total strong').textContent,'4');
   w.testState.foreign();await click('[data-action="retry-list"]');assert.equal($('.stat.total strong').textContent,'4');
@@ -69,6 +70,7 @@ function setup(demo=true){
   await submit('#report-form');assert.equal($('.stat.total strong').textContent,'5');
   // A late GPS response must not override a manually chosen point.
   await click('[data-action="home"]');await click('[data-action="report"]');await click('[data-action="upload"]');t.deny(false);t.hold(true);await click('#refresh-location');await click('[data-action="pick-report"]');w.testState.point(1,2);await click('#use-map');await new Promise(r=>setTimeout(r,120));assert.match($('#coordinates').textContent,/1.00000, 2.00000/);
+  await click('[data-action="home"]');await click('[data-action="header-location"]');w.testState.point(3,4);await click('#use-map');assert.match($('#header-location-name').textContent,/Chosen city, India/);assert($('.home-actions'));
   await click('[data-action="profile"]');await click('[data-action="logout"]');await click('#auth-submit');await click('[data-action="issues"]');await click('[data-action="scope-mine"]');assert(!$('.pie-chart'));assert(!$('.summary-stats'));assert(!$('.column-filters'));assert.equal($('#content .empty').textContent,'You haven’t reported any issues yet.');assert.equal(t.requests.length,0);
  }finally{t.dom.window.close();}
  t=setup();
@@ -79,7 +81,7 @@ function setup(demo=true){
   w.Native.choosePhoto=w.Native.captureVideo;
   await click('#auth-submit');await click('[data-action="report"]');
   fill('#category','Roads & Potholes');await click('[data-action="camera"]');await click('[data-kind="video"]');await pause();
-  assert($('#report-photo video'));assert(!$('[data-action="crop"]'));assert.equal(t.gps(),1);
+  assert($('#report-photo video'));assert(!$('[data-action="crop"]'));assert.equal(t.gps(),2);
   assert.match($('#report-form').textContent,/not scanned/);
   await submit('#report-form');await click('[data-action="detail"]');assert($('#issue-detail video'));
   await click('[data-action="upload-proof"]');assert($('#latest-photo video'));

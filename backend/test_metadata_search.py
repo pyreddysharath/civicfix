@@ -25,3 +25,8 @@ class MetadataSearchTests(unittest.TestCase):
         self.assertEqual(closed['proofs'][0]['media_metadata']['name'],'repair.jpg')
         fetched=self.call('GET','/issues/'+issue['id'])
         self.assertEqual(fetched['proofs'][0]['media_metadata']['name'],'repair.jpg')
+
+    def test_worldwide_count_ignores_location_filters(self):
+        self.assertEqual(self.call('GET','/issues/count')['total'],0)
+        self.report()
+        self.assertEqual(self.call('GET','/issues/count',query={'lat':'0','lon':'0','radius':'3'})['total'],1)
