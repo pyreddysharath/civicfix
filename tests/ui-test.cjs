@@ -35,7 +35,7 @@ function setup(demo=true){
   await click('#auth-submit');assert($('.report-entry'));assert(!$('#report-form'));assert.equal(t.gps(),0);assert.equal($('.avatar').textContent,'D');
   await click('[data-action="report"]');assert($('#report-form'));assert(!$('#title'));assert(!$('#report-photo'));assert(!$('#refresh-location'));assert(!$('.required'));assert(!$('.welcome'));
   assert.deepEqual([...$('#report-form').querySelectorAll('select,textarea')].map(x=>x.id),['category','description','eta']);assert.equal($('#eta').value,'7');
-  fill('#category','Roads & Potholes');await click('[data-action="camera"]');await pause();assert.equal(t.gps(),1);assert.match($('#coordinates').textContent,/17.40000/);
+  fill('#category','Roads & Potholes');await click('[data-action="camera"]');await click('[data-kind="photo"]');await pause();assert.equal(t.gps(),1);assert.match($('#coordinates').textContent,/17.40000/);
   await submit('#report-form');assert.equal($('.stat.total strong').textContent,'1');assert.equal($('.stat.open strong').textContent,'1');assert.equal(t.requests.length,0);
   await click('[data-action="detail"]');assert.match($('#issue-detail').textContent,/Roads & Potholes/);await submit('#resolve-form');assert.equal($('.stat.closed strong').textContent,'1');
   await click('[data-action="home"]');await click('[data-action="profile"]');fill('#profile-name','Sharath');fill('#profile-email','demo@example.com');await submit('#profile-form');assert.equal($('.avatar').textContent,'S');
@@ -61,6 +61,21 @@ function setup(demo=true){
   await click('[data-action="home"]');await click('[data-action="report"]');await click('[data-action="upload"]');t.deny(false);t.hold(true);await click('#refresh-location');await click('[data-action="pick-report"]');w.testState.point(1,2);await click('#use-map');await new Promise(r=>setTimeout(r,120));assert.match($('#coordinates').textContent,/1.00000, 2.00000/);
   await click('[data-action="profile"]');await click('[data-action="logout"]');await click('#auth-submit');await click('[data-action="issues"]');await click('[data-action="scope-mine"]');assert.equal($('.stat.total strong').textContent,'0');assert.equal(t.requests.length,0);
  }finally{t.dom.window.close();}
+ t=setup();
+ try{
+  const {$,click,fill,submit,w}=t;
+  const video='data:video/mp4;base64,fixture';
+  w.Native.captureVideo=id=>setTimeout(()=>w.nativeReply(id,{photo:video},null),0);
+  w.Native.choosePhoto=w.Native.captureVideo;
+  await click('#auth-submit');await click('[data-action="report"]');
+  fill('#category','Roads & Potholes');await click('[data-action="camera"]');await click('[data-kind="video"]');await pause();
+  assert($('#report-photo video'));assert(!$('[data-action="crop"]'));assert.equal(t.gps(),1);
+  assert.match($('#report-form').textContent,/not scanned/);
+  await submit('#report-form');await click('[data-action="detail"]');assert($('#issue-detail video'));
+  await click('[data-action="upload-proof"]');assert($('#latest-photo video'));
+  await submit('#resolve-form');assert.equal($('.stat.closed strong').textContent,'1');
+  assert.equal(w.document.querySelectorAll('#issue-detail video').length,2);
+ }finally{t.dom.window.close();}
  t=setup(false);
  try{
   const {$,click,fill,submit,requests}=t;
@@ -70,5 +85,5 @@ function setup(demo=true){
   await click('#profile-send');fill('#profile-otp','123456');await click('#profile-verify');fill('#profile-email','other@example.com');await submit('#profile-form');assert.match($('#profile-error').textContent,/Verify/);
   fill('#profile-email','sharath@example.com');fill('#profile-name','Updated name');await submit('#profile-form');assert.equal($('.avatar').textContent,'U');assert(requests.some(r=>r.url==='/me'&&r.body.name==='Updated name'));
  }finally{t.dom.window.close();}
- console.log('PASS: home, report field order, capture GPS, maps/pin/zero coordinates, GPS failure and race, 3km/5km radius, empty and populated chart totals, filters, search places, resolution, profile, OTP email-change gate, demo isolation and logout.');
+ console.log('PASS: video capture/upload/playback/proof and GPS, home, report field order, capture GPS, maps/pin/zero coordinates, GPS failure and race, 3km/5km radius, empty and populated chart totals, filters, search places, resolution, profile, OTP email-change gate, demo isolation and logout.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

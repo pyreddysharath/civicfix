@@ -146,6 +146,13 @@ def email_auth(path, body, ip):
         return session(dict(row))
     raise ApiError('Not found',404)
 
+def clean_media(value):
+    if isinstance(value,str) and value.startswith('data:video/'):
+        from video import clean_video, VideoError
+        try: return clean_video(value)
+        except VideoError as e: raise ApiError(str(e),e.status)
+    return clean_photo(value)
+
 def clean_photo(value):
     try:
         if not isinstance(value,str) or len(value)>7_000_000: raise ValueError()
@@ -160,7 +167,8 @@ def clean_photo(value):
         return out.getvalue(), data_url(small.getvalue())
     except (ValueError,UnidentifiedImageError,OSError,Image.DecompressionBombError,Image.DecompressionBombWarning):
         raise ApiError('Use a valid JPEG, PNG or WebP, at least 160px and under 5 MB.')
-def data_url(blob): return 'data:image/jpeg;base64,'+base64.b64encode(blob).decode()
+def is_video(blob): return blob[4:8]==b'ftyp'
+def data_url(blob): return ('data:video/mp4;base64,' if is_video(blob) else 'data:image/jpeg;base64,')+base64.b64encode(blob).decode()
 def moderate_photo(photo):
     """Fail closed: never persist an image without a successful safety result."""
     key=os.environ.get('OPENAI_API_KEY')
@@ -195,6 +203,7 @@ def analyze(photo, description):
     except (KeyError,ValueError,TypeError,ApiError): return {'available':False,'summary':'AI returned an incomplete result. Please enter the details.'}
 
 def validate_proof(issue, proof, photo):
+    if is_video(issue['photo']) or is_video(photo): return {'decision':'review','reason':'Video evidence requires human review. The issue stays open.'}
     # These checks support, but do not authenticate, client-supplied location metadata.
     if hashlib.sha256(issue['photo']).digest()==hashlib.sha256(photo).digest(): return {'decision':'rejected','reason':'The proof is identical to the original image.'}
     if proof['captured']<issue['created'] or now()-proof['captured']>86400: return {'decision':'review','reason':'Proof must be captured after the report and within the last 24 hours.'}
@@ -256,7 +265,8 @@ def dispatch(method,path,query,body,token,ip):
         # Browsers have GPS but no native reverse geocoder. Android uses its built-in Geocoder.
         raise ApiError('Address detection is available in the Android app. Open Nenu Saitham on Android to report an issue.',503)
     if method=='POST' and path=='/analyze':
-        rate('ai:'+u['id'],30); photo,_=clean_photo(body.get('photo'))
+        rate('ai:'+u['id'],30); photo,_=clean_media(body.get('photo'))
+        if is_video(photo): raise ApiError('Automatic issue analysis currently requires a photo.')
         return analyze(photo,text(body,'description',3000,False))
     if method=='POST' and path=='/issues':
         request_id=text(body,'request_id',80)
@@ -266,7 +276,7 @@ def dispatch(method,path,query,body,token,ip):
         lat,lon,accuracy,captured=gps(body)
         eta_days=number(body,'eta_days',7,366)
         if not eta_days.is_integer(): raise ApiError('ETA must be a whole number of days, at least 7.')
-        photo,thumbnail=clean_photo(body.get('photo')); category=text(body,'category',40,False) or 'Other'
+        photo,thumbnail=clean_media(body.get('photo')); category=text(body,'category',40,False) or 'Other'
         category=CATEGORY_ALIASES.get(category,category)
         if category not in CATEGORIES: raise ApiError('Invalid category')
         # Analysis is server-owned; do not trust client AI claims.
@@ -320,7 +330,7 @@ def dispatch(method,path,query,body,token,ip):
         if len(parts)==3 and parts[2]=='resolve' and method=='POST':
             if issue['user_id']!=u['id']: raise ApiError('Only the person who raised this issue can mark it resolved.',403)
             if issue['resolved'] is not None: return issue_view(issue,True)
-            photo=clean_photo(body['photo'])[0] if body.get('photo') else None
+            photo=clean_media(body['photo'])[0] if body.get('photo') else None
             t=now()
             with database() as db:
                 db.execute('BEGIN IMMEDIATE')
@@ -336,7 +346,7 @@ def dispatch(method,path,query,body,token,ip):
             rate('proof:'+u['id'],20)
             with database() as db: count=db.execute('SELECT count(*) FROM proofs WHERE issue_id=?',(issue['id'],)).fetchone()[0]
             if count>=20: raise ApiError('Proof limit reached. Contact the operator for review.',409)
-            lat,lon,accuracy,captured=gps(body); photo,_=clean_photo(body.get('photo')); note=text(body,'note',1000,False)
+            lat,lon,accuracy,captured=gps(body); photo,_=clean_media(body.get('photo')); note=text(body,'note',1000,False)
             proof={'lat':lat,'lon':lon,'accuracy':accuracy,'captured':captured}; result=validate_proof(issue,proof,photo); accepted=result['decision']=='accepted'; t=now()
             with database() as db:
                 db.execute('BEGIN IMMEDIATE')
@@ -368,7 +378,7 @@ def application(env,start_response):
             start_response('200 OK',[('Content-Type',mime+'; charset=utf-8'),('Content-Length',str(len(payload))),('Cache-Control','no-store'),('X-Content-Type-Options','nosniff')])
             return [payload]
         length=int(env.get('CONTENT_LENGTH') or 0)
-        if length<0 or length>8_000_000: raise ApiError('Upload too large',413)
+        if length<0 or length>15_000_000: raise ApiError('Upload too large',413)
         if method=='POST':
             try: body=json.loads(env['wsgi.input'].read(length) or '{}')
             except ValueError: raise ApiError('Invalid JSON')
