@@ -28,7 +28,7 @@ public class MainActivity extends Activity {
         if(state!=null){captureId=state.getString("captureId"); String f=state.getString("captureFile"); if(f!=null)captureFile=new File(f);captureTime=state.getLong("captureTime");}
         web=new WebView(this); setContentView(web);
         web.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets.consumeSystemWindowInsets();});
-        WebSettings s=web.getSettings(); s.setJavaScriptEnabled(true); s.setUserAgentString(s.getUserAgentString()+" NenuSaitham/0.5.0 (com.civicfix.app)"); s.setDomStorageEnabled(true); s.setAllowFileAccess(false); s.setAllowContentAccess(false); s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        WebSettings s=web.getSettings(); s.setJavaScriptEnabled(true); s.setUserAgentString(s.getUserAgentString()+" NenuSaitham/0.5.1 (com.civicfix.app)"); s.setDomStorageEnabled(true); s.setAllowFileAccess(false); s.setAllowContentAccess(false); s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         web.setWebChromeClient(new WebChromeClient());
         web.addJavascriptInterface(new Bridge(),"Native");
         web.setWebViewClient(new WebViewClient(){
@@ -121,7 +121,7 @@ public class MainActivity extends Activity {
             try{
                 if(!Double.isFinite(lat)||!Double.isFinite(lon)||lat< -90||lat>90||lon< -180||lon>180)throw new Exception("Invalid coordinates");
                 JSONObject j=new JSONObject();j.put("lat",lat);j.put("lon",lon);j.put("accuracy",0);
-                if(Geocoder.isPresent())try{List<Address> a=new Geocoder(MainActivity.this,Locale.getDefault()).getFromLocation(lat,lon,1);if(a!=null&&!a.isEmpty())j=addressJson(a.get(0));}catch(Exception ignored){}
+                j=reverseAddress(lat,lon);
                 // Retain the chosen point, not a geocoder's nearest address centroid.
                 j.put("lat",lat);j.put("lon",lon);reply(id,j,null);
             }catch(Exception e){reply(id,null,"Could not read selected location");}
@@ -136,9 +136,42 @@ public class MainActivity extends Activity {
     JSONObject addressJson(Address x) throws JSONException{
         JSONObject j=new JSONObject();j.put("lat",x.getLatitude());j.put("lon",x.getLongitude());j.put("accuracy",0);
         j.put("street",x.getThoroughfare()==null?"":x.getThoroughfare());
-        String city=x.getLocality()!=null?x.getLocality():x.getSubAdminArea();j.put("city",city==null?"":city);
+        String city=x.getLocality();
+        if(city!=null && (city.equalsIgnoreCase(String.valueOf(x.getSubLocality())) || city.equalsIgnoreCase(String.valueOf(x.getThoroughfare()))))city=null;
+        j.put("city",city==null?"":city);j.put("area",x.getSubLocality());j.put("district",x.getSubAdminArea());j.put("postcode",x.getPostalCode());
         j.put("state",x.getAdminArea()==null?"":x.getAdminArea());j.put("country",x.getCountryName()==null?"":x.getCountryName());
         j.put("label",x.getMaxAddressLineIndex()>=0?x.getAddressLine(0):j.optString("city"));return j;
+    }
+    JSONObject reverseAddress(double lat,double lon) throws JSONException{
+        JSONObject result=new JSONObject();
+        if(Geocoder.isPresent())try{
+            List<Address> addresses=new Geocoder(MainActivity.this,Locale.getDefault()).getFromLocation(lat,lon,5);
+            if(addresses!=null&&!addresses.isEmpty()){
+                result=addressJson(addresses.get(0));
+                for(Address address:addresses){
+                    JSONObject candidate=addressJson(address);
+                    for(String key:Arrays.asList("city","street","area","district","state","country","postcode"))
+                        if(result.optString(key,"").isEmpty()&&!candidate.optString(key,"").isEmpty())result.put(key,candidate.get(key));
+                }
+            }
+        }catch(Exception ignored){}
+        result.put("lat",lat);result.put("lon",lon);result.put("accuracy",0);return result;
+    }
+    JSONObject fileDetails(Uri uri,boolean captured) {
+        JSONObject meta=new JSONObject();
+        try{
+            meta.put("source",captured?"Camera":"Upload");meta.put("selected_at",System.currentTimeMillis()/1000d);
+            meta.put("mime",getContentResolver().getType(uri));
+            try(android.database.Cursor cursor=getContentResolver().query(uri,new String[]{android.provider.OpenableColumns.DISPLAY_NAME,android.provider.OpenableColumns.SIZE},null,null,null)){
+                if(cursor!=null&&cursor.moveToFirst()){
+                    meta.put("name",cursor.getString(0));if(!cursor.isNull(1))meta.put("original_bytes",cursor.getLong(1));
+                }
+            }
+        }catch(Exception ignored){}
+        try(android.database.Cursor cursor=getContentResolver().query(uri,new String[]{android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED},null,null,null)){
+            if(cursor!=null&&cursor.moveToFirst()&&!cursor.isNull(0))meta.put("last_modified",new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z",Locale.US).format(new Date(cursor.getLong(0))));
+        }catch(Exception ignored){}
+        return meta;
     }
     void locate(){
         lm=(LocationManager)getSystemService(LOCATION_SERVICE);
@@ -148,7 +181,7 @@ public class MainActivity extends Activity {
                 stopLocation();String id=locationId;locationId=null;
                 io.execute(()->{JSONObject j=new JSONObject();try{
                     j.put("lat",l.getLatitude());j.put("lon",l.getLongitude());j.put("accuracy",l.getAccuracy());j.put("locationTime",l.getTime()/1000d);
-                    if(Geocoder.isPresent())try{List<Address> a=new Geocoder(MainActivity.this,Locale.getDefault()).getFromLocation(l.getLatitude(),l.getLongitude(),1);if(a!=null&&!a.isEmpty()){Address x=a.get(0);j.put("street",x.getThoroughfare());j.put("city",x.getLocality()!=null?x.getLocality():x.getSubAdminArea());j.put("state",x.getAdminArea());j.put("country",x.getCountryName());}}catch(Exception ignored){}
+                    j=reverseAddress(l.getLatitude(),l.getLongitude());j.put("accuracy",l.getAccuracy());j.put("locationTime",l.getTime()/1000d);
                     reply(id,j,null);
                 }catch(Exception e){reply(id,null,"Could not read location");}});
             }
@@ -171,7 +204,7 @@ public class MainActivity extends Activity {
         if(req==92||req==93){
             final String pickerId=captureId;captureId=null;
             if(result!=RESULT_OK||data==null||data.getData()==null){reply(pickerId,null,"No media selected");return;}
-            final Uri picked=data.getData();final long pickedTime=captureTime;final String mime=getContentResolver().getType(picked);final boolean video=req==93||(mime!=null&&mime.startsWith("video/"));
+            final Uri picked=data.getData();final long pickedTime=captureTime;final String mime=getContentResolver().getType(picked);final boolean video=req==93||(mime!=null&&mime.startsWith("video/"));final JSONObject metadata=fileDetails(picked,req==93);
             io.execute(()->{
                 File file=null;
                 try{
@@ -180,15 +213,15 @@ public class MainActivity extends Activity {
                         if(in==null)throw new IOException();byte[] buffer=new byte[8192];int n,total=0;
                         while((n=in.read(buffer))!=-1){total+=n;if(total>10*1024*1024)throw new IOException();out.write(buffer,0,n);}
                     }
-                    if(video)encodeVideo(pickerId,file,pickedTime,mime);else encodePhoto(pickerId,file,pickedTime);
+                    if(video)encodeVideo(pickerId,file,pickedTime,mime,metadata);else encodePhoto(pickerId,file,pickedTime,metadata);
                 }catch(Exception e){if(file!=null)file.delete();reply(pickerId,null,"Choose a supported photo or video under 10 MB.");}
             });return;
         }
         final String id=captureId;final File f=captureFile;final long time=captureTime;captureId=null;
         if(result!=RESULT_OK){if(f!=null)f.delete();reply(id,null,"Camera cancelled");return;}
-        io.execute(()->encodePhoto(id,f,time));
+        io.execute(()->{JSONObject metadata=new JSONObject();try{metadata.put("name",f.getName());metadata.put("source","Camera");metadata.put("selected_at",time/1000d);metadata.put("mime","image/jpeg");}catch(Exception ignored){}encodePhoto(id,f,time,metadata);});
     }
-    void encodeVideo(String id,File file,long time,String mime){
+    void encodeVideo(String id,File file,long time,String mime,JSONObject metadata){
         android.media.MediaMetadataRetriever reader=new android.media.MediaMetadataRetriever();
         try{
             if(file.length()>10*1024*1024)throw new IOException();
@@ -198,11 +231,17 @@ public class MainActivity extends Activity {
             if(!Arrays.asList("video/mp4","video/webm","video/quicktime").contains(mime))mime="video/mp4";
             byte[] bytes=java.nio.file.Files.readAllBytes(file.toPath());
             JSONObject j=new JSONObject();j.put("photo","data:"+mime+";base64,"+Base64.encodeToString(bytes,Base64.NO_WRAP));j.put("captured",time/1000d);
+            metadata.put("original_bytes",file.length());metadata.put("duration_seconds",duration/1000d);
+            metadata.put("width",reader.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH));
+            metadata.put("height",reader.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT));
+            metadata.put("file_created",reader.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DATE));
+            metadata.put("rotation",reader.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION));
+            metadata.put("embedded_location",reader.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_LOCATION));j.put("media_metadata",metadata);
             reply(id,j,null);
         }catch(Exception e){reply(id,null,"Choose a readable video up to 10 seconds and under 10 MB.");}
         finally{try{reader.release();}catch(Exception ignored){}file.delete();}
     }
-    void encodePhoto(String id,File f,long time){
+    void encodePhoto(String id,File f,long time,JSONObject metadata){
         try{
             BitmapFactory.Options bounds=new BitmapFactory.Options();bounds.inJustDecodeBounds=true;BitmapFactory.decodeFile(f.getAbsolutePath(),bounds);
             if(bounds.outWidth<160||bounds.outHeight<160||((long)bounds.outWidth*bounds.outHeight)>20000000)throw new IOException();
@@ -213,7 +252,13 @@ public class MainActivity extends Activity {
             Bitmap fixed=Bitmap.createBitmap(bitmap,0,0,bitmap.getWidth(),bitmap.getHeight(),m,true);
             float ratio=Math.min(1,1600f/Math.max(fixed.getWidth(),fixed.getHeight()));Bitmap resized=Bitmap.createScaledBitmap(fixed,Math.max(1,Math.round(fixed.getWidth()*ratio)),Math.max(1,Math.round(fixed.getHeight()*ratio)),true);
             ByteArrayOutputStream out=new ByteArrayOutputStream();resized.compress(Bitmap.CompressFormat.JPEG,85,out);
-            JSONObject j=new JSONObject();j.put("photo","data:image/jpeg;base64,"+Base64.encodeToString(out.toByteArray(),Base64.NO_WRAP));j.put("captured",time/1000d);reply(id,j,null);
+            JSONObject j=new JSONObject();j.put("photo","data:image/jpeg;base64,"+Base64.encodeToString(out.toByteArray(),Base64.NO_WRAP));j.put("captured",time/1000d);
+            metadata.put("original_bytes",f.length());metadata.put("width",bounds.outWidth);metadata.put("height",bounds.outHeight);
+            metadata.put("saved_width",resized.getWidth());metadata.put("saved_height",resized.getHeight());
+            metadata.put("orientation",orientation);metadata.put("camera_make",exif.getAttribute(ExifInterface.TAG_MAKE));metadata.put("camera_model",exif.getAttribute(ExifInterface.TAG_MODEL));
+            metadata.put("file_created",exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL));
+            float[] gps=new float[2];if(exif.getLatLong(gps)){metadata.put("embedded_lat",gps[0]);metadata.put("embedded_lon",gps[1]);}
+            j.put("media_metadata",metadata);reply(id,j,null);
         }catch(Exception e){reply(id,null,"Unable to read captured photo. Please retry.");}finally{if(f!=null)f.delete();}
     }
     @Override public void onBackPressed(){web.evaluateJavascript("window.appBack()",null);}

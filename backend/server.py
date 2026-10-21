@@ -35,6 +35,7 @@ def init_db():
           resolved REAL, title TEXT, description TEXT, category TEXT, street TEXT, city TEXT, state TEXT, country TEXT,
           lat REAL, lon REAL, accuracy REAL, captured REAL, photo BLOB, thumbnail TEXT, analysis TEXT, request_id TEXT,
           UNIQUE(user_id,request_id));
+        CREATE TABLE IF NOT EXISTS media_details(issue_id TEXT REFERENCES issues(id) ON DELETE CASCADE, media_hash TEXT, details TEXT, PRIMARY KEY(issue_id,media_hash));
         CREATE INDEX IF NOT EXISTS area ON issues(country,state,city);
         CREATE INDEX IF NOT EXISTS reporter ON issues(user_id);
         CREATE TABLE IF NOT EXISTS proofs(id TEXT PRIMARY KEY, issue_id TEXT REFERENCES issues(id), user_id TEXT REFERENCES users(id),
@@ -216,6 +217,21 @@ def validate_proof(issue, proof, photo):
     accepted=all(r.get(k) is True for k in ('same_scene','fixed','clear')) and confidence>=0.95
     return {'decision':'accepted' if accepted else 'review','reason':str(r.get('reason','Review required'))[:2000],'confidence':confidence,'method':'AI visual comparison; not independently verified'}
 
+def save_media_details(db,issue_id,blob,body,media_id='original'):
+    metadata=body.get('media_metadata') or {}
+    if not isinstance(metadata,dict): raise ApiError('Invalid media details')
+    allowed=('name','mime','original_bytes','width','height','saved_width','saved_height','duration_seconds','file_created','last_modified','selected_at','source','camera_make','camera_model','orientation','rotation','embedded_lat','embedded_lon','embedded_location','cropped','area','district','postcode')
+    cleaned={}
+    for key in allowed:
+        value=metadata.get(key)
+        if isinstance(value,(str,int,float,bool)) and not isinstance(value,complex):
+            if isinstance(value,float) and not math.isfinite(value): continue
+            cleaned[key]=value[:300] if isinstance(value,str) else value
+    db.execute('INSERT OR REPLACE INTO media_details VALUES(?,?,?)',(issue_id,media_id+':'+hashlib.sha256(blob).hexdigest(),json.dumps(cleaned)))
+def read_media_details(db,issue_id,blob,media_id='original'):
+    row=db.execute('SELECT details FROM media_details WHERE issue_id=? AND media_hash=?',(issue_id,media_id+':'+hashlib.sha256(blob).hexdigest())).fetchone()
+    return json.loads(row['details']) if row else {}
+
 def issue_view(row, detail=False):
     r=dict(row); r.pop('photo',None); r.pop('request_id',None); r.pop('username',None)
     r['analysis']=json.loads(r.get('analysis') or '{}')
@@ -225,8 +241,9 @@ def issue_view(row, detail=False):
     if detail:
         r['photo']=data_url(row['photo'])
         with database() as db:
+            r['media_metadata']=read_media_details(db,r['id'],row['photo'])
             proofs=db.execute('SELECT p.*, u.name AS contributor, u.username FROM proofs p JOIN users u ON p.user_id=u.id WHERE issue_id=? ORDER BY created DESC',(r['id'],)).fetchall()
-            r['proofs']=[{**{k:p[k] for k in ('id','created','note','contributor','accepted')},'photo':data_url(p['photo']),'result':json.loads(p['result'])} for p in proofs]
+            r['proofs']=[{**{k:p[k] for k in ('id','created','note','contributor','accepted')},'photo':data_url(p['photo']),'media_metadata':read_media_details(db,r['id'],p['photo'],p['id']),'result':json.loads(p['result'])} for p in proofs]
             r['events']=[dict(e) for e in db.execute('SELECT created,actor,action,note FROM events WHERE issue_id=? ORDER BY id DESC',(r['id'],))]
     return r
 
@@ -286,6 +303,7 @@ def dispatch(method,path,query,body,token,ip):
         try:
             with database() as db:
                 db.execute('INSERT INTO issues VALUES('+','.join('?' for _ in params)+')',params)
+                save_media_details(db,id,photo,body)
                 db.execute('INSERT INTO events(issue_id,created,actor,action,note) VALUES(?,?,?,?,?)',(id,created,u['username'],'reported','Community target deadline set by reporter'))
         except sqlite3.IntegrityError:
             with database() as db: id=db.execute('SELECT id FROM issues WHERE user_id=? AND request_id=?',(u['id'],request_id)).fetchone()['id']
@@ -293,17 +311,16 @@ def dispatch(method,path,query,body,token,ip):
     if method=='GET' and path=='/issues':
         args=[]; where=['1=1']; q=query.get('q','').strip().lower()
         if len(q)>200: raise ApiError('Search is too long')
-        if q:
+        for keyword in dict.fromkeys(q.replace(","," ").split()):
             # instr treats %, _ and other query characters literally.
-            where.append("instr(lower(i.title||' '||i.description||' '||i.street||' '||i.city||' '||i.state||' '||i.country||' '||u.name||' '||u.username||' '||coalesce((SELECT group_concat(pu.name||' '||pu.username,' ') FROM proofs p JOIN users pu ON pu.id=p.user_id WHERE p.issue_id=i.id),'')),?)>0"); args.append(q)
+            where.append("instr(lower(i.title||' '||i.category||' '||i.description||' '||i.street||' '||i.city||' '||i.state||' '||i.country||' '||u.name||' '||u.username||' '||coalesce((SELECT group_concat(pu.name||' '||pu.username,' ') FROM proofs p JOIN users pu ON pu.id=p.user_id WHERE p.issue_id=i.id),'')),?)>0"); args.append(keyword)
         if query.get('mine')=='1': where.append('i.user_id=?'); args.append(u['id'])
         if query.get('reporter_id'): where.append('i.user_id=?'); args.append(query['reporter_id'])
-        for field in ('country','city','street'):
+        for field in ('country','city','street','category'):
             value=query.get(field,'').strip()
             if len(value)>200: raise ApiError('Filter is too long')
-            if value: where.append('lower(i.'+field+')=lower(?)'); args.append(value)
-        category=query.get('category','')
-        if category: where.append('i.category=?'); args.append(category)
+            for keyword in dict.fromkeys(value.lower().replace(',',' ').split()):
+                where.append('instr(lower(i.'+field+'),?)>0'); args.append(keyword)
         status=query.get('status','')
         if status=='resolved': where.append('i.resolved IS NOT NULL')
         if status=='open': where.append('i.resolved IS NULL AND i.deadline>?'); args.append(now())
@@ -338,7 +355,8 @@ def dispatch(method,path,query,body,token,ip):
                 if changed:
                     if photo:
                         result=json.dumps({'decision':'accepted','reason':'Marked resolved by the reporter.','method':'Reporter confirmation'})
-                        db.execute('INSERT INTO proofs VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(secrets.token_hex(12),issue['id'],u['id'],t,None,None,None,t,'Latest photo',photo,result,1))
+                        proof_id=secrets.token_hex(12);db.execute('INSERT INTO proofs VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(proof_id,issue['id'],u['id'],t,None,None,None,t,'Latest photo',photo,result,1))
+                        save_media_details(db,issue['id'],photo,body,proof_id)
                     db.execute('INSERT INTO events(issue_id,created,actor,action,note) VALUES(?,?,?,?,?)',(issue['id'],t,u['name'],'reporter_closed','Marked resolved by reporter; latest photo optional'))
             return issue_view(get_issue(issue['id']),True)
         if len(parts)==3 and parts[2]=='proofs' and method=='POST':
@@ -352,7 +370,8 @@ def dispatch(method,path,query,body,token,ip):
                 db.execute('BEGIN IMMEDIATE')
                 fresh=db.execute('SELECT resolved FROM issues WHERE id=?',(issue['id'],)).fetchone()
                 if fresh['resolved'] is not None: raise ApiError('Another proof has already closed this issue.',409)
-                db.execute('INSERT INTO proofs VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(secrets.token_hex(12),issue['id'],u['id'],t,lat,lon,accuracy,captured,note,photo,json.dumps(result),int(accepted)))
+                proof_id=secrets.token_hex(12);db.execute('INSERT INTO proofs VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(proof_id,issue['id'],u['id'],t,lat,lon,accuracy,captured,note,photo,json.dumps(result),int(accepted)))
+                save_media_details(db,issue['id'],photo,body,proof_id)
                 if accepted: db.execute('UPDATE issues SET resolved=? WHERE id=?',(t,issue['id']))
                 db.execute('INSERT INTO events(issue_id,created,actor,action,note) VALUES(?,?,?,?,?)',(issue['id'],t,u['username'],'auto_closed' if accepted else 'proof_'+result['decision'],result['reason']))
             return issue_view(get_issue(issue['id']),True)
