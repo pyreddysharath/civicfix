@@ -19,6 +19,9 @@ class MetadataSearchTests(unittest.TestCase):
         data={'name':'road.jpg','width':1200,'camera_model':'Camera','unexpected':'discard'}
         issue=self.report(media_metadata=data)
         self.assertEqual(issue['media_metadata']['name'],'road.jpg')
+        listed=self.call('GET','/issues')['items'][0]
+        self.assertEqual(listed['media_metadata']['name'],'road.jpg')
+        self.assertNotIn('photo',listed)
         self.assertNotIn('unexpected',issue['media_metadata'])
         closed=self.call('POST','/issues/'+issue['id']+'/resolve',{'photo':test_server.photo('gray'),'media_metadata':{'name':'repair.jpg'}})
         self.assertEqual(closed['media_metadata']['name'],'road.jpg')
