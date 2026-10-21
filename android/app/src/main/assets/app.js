@@ -398,7 +398,7 @@ document.addEventListener('click',async event=>{
  if(action==='upload-proof'){if(window.Native)selectNativePhoto(false,true);else $('#proof-input').click();}
  if(action==='remove-proof'){selected.latestPhoto='';$('#latest-photo').innerHTML='';}
 });
-window.appBack=()=>{if(cropDialog){closeCrop();return;}if(picker){closePicker();return;}if(selected){selected=null;$('#issue-detail').innerHTML='';renderCards();}else if(mode==='register'&&!currentUser){mode='login';authPage();}else if(currentUser){saveReportFields();active='home';landing();}};
+window.appBack=()=>{const info=$('.media-dialog');if(info){info.remove();return;}if(cropDialog){closeCrop();return;}if(picker){closePicker();return;}if(selected){selected=null;$('#issue-detail').innerHTML='';renderCards();}else if(mode==='register'&&!currentUser){mode='login';authPage();}else if(currentUser){saveReportFields();active='home';landing();}};
 let lastTimeSignature='';
 setInterval(()=>{if(active==='issues'&&currentUser){const signature=issues.map(i=>status(i)+elapsed(i)).join('|');if(signature!==lastTimeSignature){renderCards();lastTimeSignature=signature;}if(selected?.deadline&&$('#detail-status')){$('#detail-status').innerHTML=badge(selected);$('#detail-elapsed').textContent=elapsed(selected);}}},1000);
 (async()=>{if(!DEMO_LOGIN&&(config.user?.id||webToken)){shell('<section class="panel"><p role="status">Signing in…</p></section>');try{currentUser=await api('GET','/me');landing();return;}catch{if(window.Native)Native.logout();webToken='';sessionStorage.removeItem('civicfix-session');}}authPage();})();
