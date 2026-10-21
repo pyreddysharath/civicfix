@@ -57,7 +57,7 @@ function setup(demo=true){
   fill('#filter-category','potholes roads');assert.equal($('.stat.total strong').textContent,'4');assert.equal($('#filter-category').parentElement.querySelectorAll('.keyword-chip').length,2);
   $('#filter-category').parentElement.querySelector('.keyword-chip').click();assert.equal($('.stat.total strong').textContent,'4');fill('#filter-category','');
   await click('[data-action="pick-search"]');assert($('#picker-map'));w.testState.point(0,0);await click('#use-map');assert(!w.document.querySelector('dialog'));assert.equal($('.stat.total strong').textContent,'0');
-  fill('#area-query','London');await submit('#area-search');await click('.place-result');assert.match($('#area-status').textContent,/London/);
+  assert($('#location-search-controls').hidden);await click('[name="search-mode"][value="location"]');assert(!$('#location-search-controls').hidden);assert($('#distance-search-controls').hidden);fill('#area-query','London');await submit('#area-search');await click('.place-result');assert.match($('#area-status').textContent,/London/);
   await click('[aria-label="Remove london"]');fill('#area-query','0,0');await submit('#area-search');await click('.place-result');assert.match($('#area-status').textContent,/0.00000/);
   await click('[data-action="scope-mine"]');assert(!$('#radius'));assert.equal($('.stat.total strong').textContent,'4');
   w.testState.foreign();await click('[data-action="retry-list"]');assert.equal($('.stat.total strong').textContent,'4');
