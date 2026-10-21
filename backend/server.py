@@ -238,10 +238,11 @@ def issue_view(row, detail=False):
     r['status']='resolved' if r['resolved'] is not None else ('overdue' if now()>=r['deadline'] else 'open')
     r['elapsed_seconds']=max(0,(r['resolved'] or now())-r['created'])
     r['on_time']=(r['resolved'] if r['resolved'] is not None else now())<=r['deadline']
+    with database() as db:
+        r['media_metadata']=read_media_details(db,r['id'],row['photo'])
     if detail:
         r['photo']=data_url(row['photo'])
         with database() as db:
-            r['media_metadata']=read_media_details(db,r['id'],row['photo'])
             proofs=db.execute('SELECT p.*, u.name AS contributor, u.username FROM proofs p JOIN users u ON p.user_id=u.id WHERE issue_id=? ORDER BY created DESC',(r['id'],)).fetchall()
             r['proofs']=[{**{k:p[k] for k in ('id','created','note','contributor','accepted')},'photo':data_url(p['photo']),'media_metadata':read_media_details(db,r['id'],p['photo'],p['id']),'result':json.loads(p['result'])} for p in proofs]
             r['events']=[dict(e) for e in db.execute('SELECT created,actor,action,note FROM events WHERE issue_id=? ORDER BY id DESC',(r['id'],))]
