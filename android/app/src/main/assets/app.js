@@ -100,7 +100,7 @@ async function submitAuth(event){
  catch(e){$('#auth-error').textContent=e.message;}finally{authBusy=false;if($('#auth-form'))setAuthBusy(false);}
 }
 function landing(){
- shell(`<button data-action="report" class="primary full report-entry">Report an Issue</button><button data-action="issues" class="text-button full issues-entry">Issues</button><div id="content"></div>`);
+ shell(`<div class="home-actions"><button data-action="report" class="primary full report-entry">Report and issue</button><button data-action="issues" class="secondary full issues-entry">Reported issues</button></div><div id="content"></div>`);
  if(active==='report')renderReport();
 }
 function saveReportFields(){if($('#report-form')&&report){report.category=$('#category').value;report.description=$('#description').value;report.eta_days=$('#eta').value;}}
@@ -301,6 +301,7 @@ async function loadIssues(){
  }catch(e){if(version===listVersion&&active==='issues'&&screen===screenVersion)$('#content').innerHTML=`<section class="panel"><p class="error" role="alert">${esc(e.message)}</p><button class="secondary" data-action="retry-list">Retry</button></section>`;}
 }
 function renderList(){
+ if(!issues.length){$('#content').innerHTML='<section class="panel"><p class="empty">'+(issueScope==='mine'?'You haven’t reported any issues yet.':'No issues found. Try another location or distance.')+'</p></section><div id="issue-detail"></div>';return;}
  $('#content').innerHTML=`<section class="panel list-panel"><div class="section-heading"><h2>${reporter?'Issues raised by '+esc(reporter.name):issueScope==='mine'?'My reported issues':'Nearby issues'}</h2><button class="text-button" data-action="retry-list">Refresh</button></div><div id="issue-summary"></div><label class="all-toggle"><input id="show-all" type="checkbox" role="switch" ${!filters.status?'checked':''}>Show all issues</label><div class="column-filters">${['category','country','city'].map(k=>`<label>${k[0].toUpperCase()+k.slice(1)}<input id="filter-${k}" maxlength="200" placeholder="Enter ${k}" value="${esc(filters[k])}"></label>`).join('')}</div><div id="empty-search-keys"></div><p class="hint" id="result-count" role="status"></p><div id="issues-list"></div></section><div id="issue-detail"></div>`;
  $('#show-all').onchange=e=>{filters.status=e.target.checked?'':'unresolved';selected=null;$('#issue-detail').innerHTML='';renderCards();};
  for(const field of ['category','country','city'])keywordInput($('#filter-'+field),filters[field],query=>{filters[field]=query;selected=null;$('#issue-detail').innerHTML='';renderCards();});renderCards();
@@ -309,7 +310,9 @@ function renderCards(){
  if(!$('#issues-list'))return;
  const matching=issues.filter(i=>['category','country','city'].every(k=>matchesKeywords(i[k],filters[k])));
  const shown=matching.filter(i=>!filters.status||(filters.status==='unresolved'?i.resolved==null:status(i)===filters.status));
- renderSummary(matching);$('#show-all').checked=!filters.status;
+ if(shown.length)renderSummary(matching);else $('#issue-summary').innerHTML='';
+ const heading=$('.list-panel .section-heading h2');if(heading)heading.hidden=issueScope==='all'&&!shown.length;
+ $('#show-all').checked=!filters.status;
  $('.column-filters').hidden=shown.length===0;$('.all-toggle').hidden=issues.length===0;
  const emptyKeys=$('#empty-search-keys');emptyKeys.innerHTML='';
  if(!shown.length){
