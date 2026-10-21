@@ -107,11 +107,14 @@ async function submitAuth(event){
  catch(e){$('#auth-error').textContent=e.message;}finally{authBusy=false;if($('#auth-form'))setAuthBusy(false);}
 }
 function homeSection(html){
- if(!$('#home-sections'))shell(`<div class="home-actions"><button type="button" data-action="report" class="primary full report-entry" aria-controls="home-sections">Report an issue</button><button type="button" data-action="issues" class="secondary full issues-entry" aria-controls="home-sections">Reported issues</button></div><div id="home-sections"></div>`);
+ if(!$('#home-sections'))shell(`<div class="home-actions" role="tablist" aria-label="Issues"><button type="button" role="tab" id="report-tab" data-action="report" class="report-entry" aria-controls="home-sections">Report an issue</button><button type="button" role="tab" id="issues-tab" data-action="issues" class="issues-entry" aria-controls="home-sections">Reported issues</button></div><div id="home-sections" role="tabpanel" tabindex="0"></div>`);
  else{closePicker();screenVersion++;}
  $('#home-sections').innerHTML=html;
- $('.report-entry').setAttribute('aria-expanded',String(active==='report'));
- $('.issues-entry').setAttribute('aria-expanded',String(active==='issues'));
+ $('.report-entry').setAttribute('aria-selected',String(active==='report'));
+ $('.issues-entry').setAttribute('aria-selected',String(active==='issues'));
+ $('#home-sections').setAttribute('aria-labelledby',active==='issues'?'issues-tab':'report-tab');
+ $('.report-entry').tabIndex=active==='issues'?-1:0;$('.issues-entry').tabIndex=active==='issues'?0:-1;
+ $('.home-actions').onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const tabs=[...e.currentTarget.querySelectorAll('[role=tab]')];const next=e.key==='Home'?0:e.key==='End'?1:1-tabs.indexOf(document.activeElement);tabs.forEach((tab,i)=>tab.tabIndex=i===next?0:-1);tabs[next].focus();};
  alignFields();
 }
 function landing(){
