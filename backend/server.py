@@ -308,6 +308,8 @@ def dispatch(method,path,query,body,token,ip):
         except sqlite3.IntegrityError:
             with database() as db: id=db.execute('SELECT id FROM issues WHERE user_id=? AND request_id=?',(u['id'],request_id)).fetchone()['id']
         return issue_view(get_issue(id),True)
+    if method=='GET' and path=='/issues/count':
+        with database() as db: return {'total':db.execute('SELECT COUNT(*) FROM issues').fetchone()[0]}
     if method=='GET' and path=='/issues':
         args=[]; where=['1=1']; q=query.get('q','').strip().lower()
         if len(q)>200: raise ApiError('Search is too long')
