@@ -54,10 +54,14 @@ class SimpleFlowTests(base.WorkflowTests):
         r=self.report(description='');self.assertEqual(r['description'],'');self.assertEqual(r['deadline']-r['created'],7*86400)
         for days in [0,6,6.99,7.1,367,float('nan')]:
             with self.assertRaises(s.ApiError):self.report(request_id=str(days),eta_days=days)
-    def test_manual_resolution_without_photo(self):
-        r=self.report();closed=self.call('POST','/issues/'+r['id']+'/resolve')
-        self.assertEqual(closed['status'],'resolved');self.assertEqual(closed['proofs'],[])
-        again=self.call('POST','/issues/'+r['id']+'/resolve');self.assertEqual(again['resolved'],closed['resolved']);self.assertEqual(len(again['events']),2)
+    def test_manual_resolution_requires_media(self):
+        r=self.report()
+        with self.assertRaises(s.ApiError): self.call('POST','/issues/'+r['id']+'/resolve')
+        self.assertIsNone(self.call('GET','/issues/'+r['id'])['resolved'])
+        closed=self.call('POST','/issues/'+r['id']+'/resolve',{'photo':photo('green')})
+        self.assertEqual(closed['status'],'resolved')
+        again=self.call('POST','/issues/'+r['id']+'/resolve')
+        self.assertEqual(again['resolved'],closed['resolved'])
     def test_manual_resolution_with_photo_and_ownership(self):
         r=self.report()
         with self.assertRaises(s.ApiError) as cm:self.call('POST','/issues/'+r['id']+'/resolve',token=self.other['token'])
@@ -75,7 +79,7 @@ class SimpleFlowTests(base.WorkflowTests):
         with patch.object(s,'now',return_value=r['deadline']):
             self.assertEqual(self.call('GET','/issues',query={'status':'open'})['total'],0)
             self.assertEqual(self.call('GET','/issues',query={'status':'overdue'})['total'],1)
-            r=self.call('POST','/issues/'+r['id']+'/resolve');self.assertEqual(r['status'],'resolved')
+            r=self.call('POST','/issues/'+r['id']+'/resolve',{'photo':photo('green')});self.assertEqual(r['status'],'resolved')
     def test_reporter_email_is_not_in_issue_responses(self):
         r=self.report();self.assertNotIn('username',r);self.assertEqual(r['reporter'],'Sharath')
 

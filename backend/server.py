@@ -347,7 +347,8 @@ def dispatch(method,path,query,body,token,ip):
         if len(parts)==3 and parts[2]=='resolve' and method=='POST':
             if issue['user_id']!=u['id']: raise ApiError('Only the person who raised this issue can mark it resolved.',403)
             if issue['resolved'] is not None: return issue_view(issue,True)
-            photo=clean_media(body['photo'])[0] if body.get('photo') else None
+            if not body.get('photo'): raise ApiError('Upload or capture a photo or video before resolving this issue.')
+            photo=clean_media(body['photo'])[0]
             t=now()
             with database() as db:
                 db.execute('BEGIN IMMEDIATE')
@@ -357,7 +358,7 @@ def dispatch(method,path,query,body,token,ip):
                         result=json.dumps({'decision':'accepted','reason':'Marked resolved by the reporter.','method':'Reporter confirmation'})
                         proof_id=secrets.token_hex(12);db.execute('INSERT INTO proofs VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(proof_id,issue['id'],u['id'],t,None,None,None,t,'Latest photo',photo,result,1))
                         save_media_details(db,issue['id'],photo,body,proof_id)
-                    db.execute('INSERT INTO events(issue_id,created,actor,action,note) VALUES(?,?,?,?,?)',(issue['id'],t,u['name'],'reporter_closed','Marked resolved by reporter; latest photo optional'))
+                    db.execute('INSERT INTO events(issue_id,created,actor,action,note) VALUES(?,?,?,?,?)',(issue['id'],t,u['name'],'reporter_closed','Marked resolved by reporter; media evidence provided'))
             return issue_view(get_issue(issue['id']),True)
         if len(parts)==3 and parts[2]=='proofs' and method=='POST':
             if issue['resolved'] is not None: raise ApiError('This issue is already resolved.',409)
