@@ -28,7 +28,7 @@ public class MainActivity extends Activity {
         if(state!=null){captureId=state.getString("captureId"); String f=state.getString("captureFile"); if(f!=null)captureFile=new File(f);captureTime=state.getLong("captureTime");}
         web=new WebView(this); setContentView(web);
         web.setOnApplyWindowInsetsListener((v,insets)->{v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets.consumeSystemWindowInsets();});
-        WebSettings s=web.getSettings(); s.setJavaScriptEnabled(true); s.setUserAgentString(s.getUserAgentString()+" NenuSaitham/0.5.1 (com.civicfix.app)"); s.setDomStorageEnabled(true); s.setAllowFileAccess(false); s.setAllowContentAccess(false); s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        WebSettings s=web.getSettings(); s.setJavaScriptEnabled(true); s.setUserAgentString(s.getUserAgentString()+" NenuSaitham/0.6.3 (com.civicfix.app)"); s.setDomStorageEnabled(true); s.setAllowFileAccess(false); s.setAllowContentAccess(false); s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         web.setWebChromeClient(new WebChromeClient());
         web.addJavascriptInterface(new Bridge(),"Native");
         web.setWebViewClient(new WebViewClient(){
@@ -36,8 +36,8 @@ public class MainActivity extends Activity {
                 Uri u=request.getUrl();
                 if("https".equals(u.getScheme()) && "app.civicfix.local".equals(u.getHost())){
                     String path=u.getPath(); if("/".equals(path))path="/index.html";
-                    if(!Arrays.asList("/index.html","/app.js","/style.css","/leaflet.js","/leaflet.css").contains(path))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));
-                    try{return new WebResourceResponse(path.endsWith(".js")?"application/javascript":path.endsWith(".css")?"text/css":"text/html","UTF-8",getAssets().open(path.substring(1)));}catch(Exception e){return null;}
+                    if(!Arrays.asList("/index.html","/app.js","/style.css","/leaflet.js","/leaflet.css","/torch-logo.jpg").contains(path))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));
+                    try{return new WebResourceResponse(path.endsWith(".jpg")?"image/jpeg":path.endsWith(".js")?"application/javascript":path.endsWith(".css")?"text/css":"text/html","UTF-8",getAssets().open(path.substring(1)));}catch(Exception e){return null;}
                 }
                 // Only map images may load externally. Scripts remain bundled in the app.
                 if("GET".equals(request.getMethod()) && "https".equals(u.getScheme()) && "tile.openstreetmap.org".equals(u.getHost()) && u.getPath().matches("/[0-9]+/[0-9]+/[0-9]+\\.png"))return null;
