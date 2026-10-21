@@ -9,7 +9,7 @@ let currentUser=null, mode='login', active='home', report=null, selected=null, i
 let verifiedEmail='',verificationToken='',otpEmail='',resendAt=0,authBusy=false,reportBusy=false,resolveBusy=false;
 const categories=['Roads & Potholes','Electricity','Street Lighting','Cleaning & Waste','Drainage & Sewage','Water Supply','Construction & Debris','Footpaths & Accessibility','Parks & Public Spaces','Traffic Signs & Signals','Other'];
 let issueScope='all',searchCenter=null,searchRadius=3,searchText='',locationPromise=null,locationVersion=0,screenVersion=0;
-let picker=null,cropDialog=null,searchMode='distance',fieldQuery='',locationQuery={};
+let picker=null,cropDialog=null,fieldQuery='',searchLocationVersion=0;
 let filters={status:'',category:'',country:'',city:''};
 let webToken=sessionStorage.getItem('civicfix-session')||'';
 window.nativeReply=(id,result,error)=>{const p=pending.get(id);if(!p)return;clearTimeout(p.timer);pending.delete(id);error?p.reject(Error(error)):p.resolve(result);};
@@ -181,7 +181,7 @@ function openPicker(purpose){
   let address={};if(window.Native)try{address=await nativeCall('reverseGeocode',point.lat,point.lon);}catch{}
   if(picker!==state)return;const chosen={...point,...address,lat:point.lat,lon:point.lon,accuracy:0,source:'map',captured:Date.now()/1000};closePicker();
   if(purpose==='report'&&report===target){locationVersion++;target.locating=false;target.location=chosen;target.locationError='';showLocation();}
-  else if(purpose==='search'){searchCenter=chosen;if(searchMode==='location')locationQuery=placeIssueQuery(chosen);renderIssuesPage(false);}
+  else if(purpose==='search'){searchCenter=chosen;searchLocationVersion++;renderIssuesPage(false);}
  };
 }
 function renderPlaceResults(node,places,select){node.innerHTML='';for(const place of places){const b=document.createElement('button');b.type='button';b.className='place-result';b.textContent=locationName(place);b.onclick=()=>{select(place);node.innerHTML='';};node.append(b);}}
@@ -273,40 +273,35 @@ async function submitReport(event){
 }
 function renderIssuesPage(autoLocate=true){
  active='issues';shell(`<div class="section-heading"><h1>Issues</h1><button class="text-button" data-action="home">Home</button></div><div class="scope-buttons"><button data-action="scope-mine" class="${issueScope==='mine'?'primary':'secondary'}" aria-pressed="${issueScope==='mine'}">My reported Issues</button><button data-action="scope-all" class="${issueScope==='all'?'primary':'secondary'}" aria-pressed="${issueScope==='all'}">Search</button></div>
- ${issueScope==='all'?`<section class="panel search-panel"><fieldset class="search-radios"><legend>Search by</legend><label><input type="radio" name="search-mode" value="distance" ${searchMode==='distance'?'checked':''}>Distance</label><label><input type="radio" name="search-mode" value="location" ${searchMode==='location'?'checked':''}>Location</label></fieldset><div id="location-search-controls" ${searchMode==='location'?'':'hidden'}><form id="area-search"><label>Search city, street or area<input id="area-query" maxlength="200" placeholder="Enter a place or latitude, longitude"></label><button type="submit" class="secondary">Search</button></form><div id="area-results"></div><button class="text-button" data-action="pick-search">Select on map</button></div><div id="distance-search-controls" ${searchMode==='distance'?'':'hidden'}><div class="photo-actions"><button class="text-button" id="near-me">Current location</button><button class="text-button" data-action="pick-search">Select on map</button></div></div><p id="area-status" class="hint" role="status">${searchCenter?esc(locationName(searchCenter)):searchMode==='location'?'Search for a city, street or area.':'Finding your current location…'}</p><div ${searchMode==='distance'?'':'hidden'}><label>Distance (km)<input id="radius" type="number" min="0.1" max="200" step="0.1" value="${searchRadius}" inputmode="decimal"></label><p class="hint">Issues within this radius of the selected location. Default: 3 km.</p></div></section>`:''}<div id="content"></div>${demoSession?'<p class="hint demo-note">Demo mode · Only reports created in this session are available.</p>':''}`);
+ ${issueScope==='all'?`<section class="panel search-panel"><div id="location-search-controls" ><form id="area-search"><label>Search city, street or area<input id="area-query" maxlength="200" placeholder="Enter a place or latitude, longitude"></label><button type="submit" class="secondary">Search</button></form><div id="area-results"></div></div><div id="distance-search-controls" ><div class="photo-actions"><button class="text-button" id="near-me">Current location</button><button class="text-button" data-action="pick-search">Select on map</button></div></div><p id="area-status" class="hint" role="status">${searchCenter?esc(locationName(searchCenter)):'Finding your current location…'}</p><div ><label>Distance (km)<input id="radius" type="number" min="0.1" max="200" step="0.1" value="${searchRadius}" inputmode="decimal"></label><p class="hint">Issues within this radius of the selected location. Default: 3 km.</p></div></section>`:''}<div id="content"></div>${demoSession?'<p class="hint demo-note">Demo mode · Only reports created in this session are available.</p>':''}`);
  const version=screenVersion;let areaVersion=0;
  if(issueScope==='all'){
-  document.querySelectorAll('[name="search-mode"]').forEach(el=>el.onchange=e=>{searchMode=e.target.value;locationQuery={};filters={status:'',category:'',country:'',city:''};renderIssuesPage();});
   $('#radius').onchange=e=>{const value=Number(e.target.value);if(!Number.isFinite(value)||value<.1||value>200){toast('Choose a distance between 0.1 and 200 km.');e.target.value=searchRadius;return;}searchRadius=value;loadIssues();};
   $('#near-me').onclick=locateIssues;
-  keywordInput($('#area-query'),'',(query,removed)=>{if(removed){$('#area-results').innerHTML='';if(query)$('#area-search').requestSubmit();else{locationQuery={};loadIssues();}}});
-  $('#area-search').onsubmit=async e=>{e.preventDefault();const query=$('#area-query').commitKeywords(),request=++areaVersion;$('#area-status').textContent='Searching…';try{const places=await searchPlaces(query);if(screenVersion!==version||request!==areaVersion)return;renderPlaceResults($('#area-results'),places,l=>{searchCenter={...l,source:'map'};locationQuery=placeIssueQuery(l);$('#area-status').textContent=locationName(l);loadIssues();});$('#area-status').textContent=places.length?'Choose a place below.':'No places found. Try the map.';}catch(e){if(screenVersion===version&&request===areaVersion)$('#area-status').textContent=e.message;}};
+  keywordInput($('#area-query'),'',(query,removed)=>{if(removed){$('#area-results').innerHTML='';if(query)$('#area-search').requestSubmit();else{$('#area-status').textContent=searchCenter?locationName(searchCenter):'Choose a location.';}}});
+  $('#area-search').onsubmit=async e=>{e.preventDefault();const query=$('#area-query').commitKeywords(),request=++areaVersion;$('#area-status').textContent='Searching…';try{const places=await searchPlaces(query);if(screenVersion!==version||request!==areaVersion)return;renderPlaceResults($('#area-results'),places,l=>{searchCenter={...l,source:'map'};searchLocationVersion++;$('#area-status').textContent=locationName(l);loadIssues();});$('#area-status').textContent=places.length?'Choose a place below.':'No places found. Try the map.';}catch(e){if(screenVersion===version&&request===areaVersion)$('#area-status').textContent=e.message;}};
  }
- if(issueScope==='all'&&searchMode==='distance'&&!searchCenter){$('#content').innerHTML='<section class="panel"><p class="empty">Choose a location to see nearby issues.</p></section>';if(autoLocate)locateIssues();}
+ if(issueScope==='all'&&!searchCenter){$('#content').innerHTML='<section class="panel"><p class="empty">Choose a location to see nearby issues.</p></section>';if(autoLocate)locateIssues();}
  else loadIssues();
 }
 async function locateIssues(){
- const version=screenVersion;if($('#near-me'))$('#near-me').disabled=true;if($('#area-status'))$('#area-status').textContent='Detecting current GPS…';
- try{const l=await currentLocation();if(screenVersion!==version)return;searchCenter=l;$('#area-status').textContent=locationName(l);loadIssues();}
- catch(e){if(screenVersion===version&&$('#area-status'))$('#area-status').textContent=e.message+' You can select an area on the map.';}
+ const version=screenVersion,request=++searchLocationVersion;if($('#near-me'))$('#near-me').disabled=true;if($('#area-status'))$('#area-status').textContent='Detecting current GPS…';
+ try{const l=await currentLocation();if(screenVersion!==version||request!==searchLocationVersion)return;searchCenter=l;$('#area-status').textContent=locationName(l);loadIssues();}
+ catch(e){if(screenVersion===version&&request===searchLocationVersion&&$('#area-status'))$('#area-status').textContent=e.message+' You can select an area on the map.';}
  finally{if(screenVersion===version&&$('#near-me'))$('#near-me').disabled=false;}
-}
-function placeIssueQuery(place){
- const fields=Object.fromEntries(['country','city','street'].filter(k=>place[k]).map(k=>[k,place[k]]));
- return Object.keys(fields).length?fields:{lat:String(place.lat),lon:String(place.lon),radius:'3'};
 }
 async function loadIssues(){
  const version=++listVersion,screen=screenVersion;selected=null;issues=[];
- if(issueScope==='all'&&searchMode==='distance'&&!validLocation(searchCenter))return;
+ if(issueScope==='all'&&!validLocation(searchCenter))return;
  $('#content').innerHTML='<section class="panel"><p role="status">Loading issues…</p></section>';
  try{
-  const query=issueScope==='mine'?{mine:'1'}:reporter?{reporter_id:reporter.id}:searchMode==='location'?locationQuery:{lat:String(searchCenter.lat),lon:String(searchCenter.lon),radius:String(searchRadius)};
+  const query=issueScope==='mine'?{mine:'1'}:reporter?{reporter_id:reporter.id}:{lat:String(searchCenter.lat),lon:String(searchCenter.lon),radius:String(searchRadius)};
   let offset=0,all=[];do{const params=new URLSearchParams({limit:'50',offset:String(offset),...query});const data=await api('GET','/issues?'+params);if(version!==listVersion||active!=='issues'||screen!==screenVersion)return;all.push(...data.items);offset=data.next_offset;}while(offset!==null&&offset!==undefined);
   issues=issueScope==='mine'?all.filter(i=>i.user_id===currentUser.id):all;renderList();
  }catch(e){if(version===listVersion&&active==='issues'&&screen===screenVersion)$('#content').innerHTML=`<section class="panel"><p class="error" role="alert">${esc(e.message)}</p><button class="secondary" data-action="retry-list">Retry</button></section>`;}
 }
 function renderList(){
- $('#content').innerHTML=`<section class="panel list-panel"><div class="section-heading"><h2>${reporter?'Issues raised by '+esc(reporter.name):issueScope==='mine'?'My reported issues':searchMode==='location'?'Location results':'Nearby issues'}</h2><button class="text-button" data-action="retry-list">Refresh</button></div><div id="issue-summary"></div><label class="all-toggle"><input id="show-all" type="checkbox" role="switch" ${!filters.status?'checked':''}>Show all issues</label><div class="column-filters">${['category','country','city'].map(k=>`<label>${k[0].toUpperCase()+k.slice(1)}<input id="filter-${k}" maxlength="200" placeholder="Enter ${k}" value="${esc(filters[k])}"></label>`).join('')}</div><div id="empty-search-keys"></div><p class="hint" id="result-count" role="status"></p><div id="issues-list"></div></section><div id="issue-detail"></div>`;
+ $('#content').innerHTML=`<section class="panel list-panel"><div class="section-heading"><h2>${reporter?'Issues raised by '+esc(reporter.name):issueScope==='mine'?'My reported issues':'Nearby issues'}</h2><button class="text-button" data-action="retry-list">Refresh</button></div><div id="issue-summary"></div><label class="all-toggle"><input id="show-all" type="checkbox" role="switch" ${!filters.status?'checked':''}>Show all issues</label><div class="column-filters">${['category','country','city'].map(k=>`<label>${k[0].toUpperCase()+k.slice(1)}<input id="filter-${k}" maxlength="200" placeholder="Enter ${k}" value="${esc(filters[k])}"></label>`).join('')}</div><div id="empty-search-keys"></div><p class="hint" id="result-count" role="status"></p><div id="issues-list"></div></section><div id="issue-detail"></div>`;
  $('#show-all').onchange=e=>{filters.status=e.target.checked?'':'unresolved';selected=null;$('#issue-detail').innerHTML='';renderCards();};
  for(const field of ['category','country','city'])keywordInput($('#filter-'+field),filters[field],query=>{filters[field]=query;selected=null;$('#issue-detail').innerHTML='';renderCards();});renderCards();
 }
@@ -382,11 +377,11 @@ document.addEventListener('click',async event=>{
  const button=event.target.closest('[data-action]');if(!button)return;event.preventDefault();const action=button.dataset.action;
  if(authBusy||reportBusy||resolveBusy)return;
  if(action==='switch-auth'){mode=mode==='login'?'register':'login';verifiedEmail='';verificationToken='';authPage();}
- if(action==='logout'){try{await api('POST','/auth/logout');}catch{}if(!demoSession){if(window.Native)Native.logout();webToken='';sessionStorage.removeItem('civicfix-session');}demoSession=false;demoIssues=[];currentUser=null;searchCenter=null;reporter=null;mode='login';authPage();}
+ if(action==='logout'){try{await api('POST','/auth/logout');}catch{}if(!demoSession){if(window.Native)Native.logout();webToken='';sessionStorage.removeItem('civicfix-session');}demoSession=false;demoIssues=[];currentUser=null;searchCenter=null;searchRadius=3;reporter=null;mode='login';authPage();}
  if(action==='home'){if(!currentUser)return;saveReportFields();active='home';listVersion++;selected=null;landing();}
  if(action==='report'){if(!currentUser)return;saveReportFields();active='report';selected=null;landing();}
  if(action==='issues'){saveReportFields();reporter=null;issueScope='mine';searchText='';filters={status:'',category:'',country:'',city:''};renderIssuesPage();}
- if(action==='scope-mine'||action==='scope-all'){reporter=null;issueScope=action==='scope-mine'?'mine':'all';if(issueScope==='all')searchMode='distance';searchText='';filters={status:'',category:'',country:'',city:''};renderIssuesPage();}
+ if(action==='scope-mine'||action==='scope-all'){reporter=null;issueScope=action==='scope-mine'?'mine':'all';searchText='';filters={status:'',category:'',country:'',city:''};renderIssuesPage();}
  if(action==='pick-report')openPicker('report');
  if(action==='pick-search')openPicker('search');
  if(action==='profile'){saveReportFields();renderProfile();}
