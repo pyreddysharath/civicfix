@@ -36,7 +36,7 @@ function setup(demo=true){
 (async()=>{
  let t=setup();const {w,$,click,fill,submit}=t;
  try{
-  await click('#auth-submit');assert($('.report-entry'));assert.equal($('.report-entry').textContent,'Report an issue');assert.equal($('.issues-entry').textContent,'Reported issues');assert($('.home-actions'));assert(!$('#report-form'));assert.equal(t.gps(),1);assert($('[data-action="header-location"]'));assert.equal($('.avatar').textContent,'D');
+  await click('#auth-submit');assert($('.report-entry'));assert.equal($('.report-entry').textContent,'Report an issue');assert.equal($('.issues-entry').textContent,'Reported issues');assert($('.home-actions'));assert($('#report-form'));assert.equal($('#report-tab').getAttribute('aria-selected'),'true');assert.equal(t.gps(),1);assert($('[data-action="header-location"]'));assert.equal($('.avatar').textContent,'D');
   const homeButtons=$('.home-actions'),homeHeader=$('header');await click('[data-action="report"]');assert.equal($('.home-actions'),homeButtons);assert.equal($('header'),homeHeader);assert($('#report-form').closest('#home-sections'));assert.equal($('.report-entry').getAttribute('aria-selected'),'true');assert($('#report-form'));assert(!$('#title'));assert(!$('#report-photo'));assert(!$('#refresh-location'));assert(!$('.required'));assert(!$('.welcome'));
   assert($('#category').closest('.field-row'));assert($('#category').closest('.field-control'));assert.deepEqual([...$('#report-form').querySelectorAll('select,textarea')].map(x=>x.id),['category','description','eta']);assert.equal($('#eta').value,'7');
   fill('#category','Roads & Potholes');fill('#description','Draft retained');await click('[data-action="issues"]');assert.equal($('.home-actions'),homeButtons);await click('[data-action="report"]');assert.equal($('#description').value,'Draft retained');assert.equal($('#category').value,'Roads & Potholes');await click('[data-action="camera"]');await click('[data-kind="photo"]');await pause();assert.equal(t.gps(),2);assert.match($('#coordinates').textContent,/17.40000/);
@@ -94,7 +94,7 @@ function setup(demo=true){
  try{
   const {$,click,fill,submit,requests}=t;
   await click('[data-action="switch-auth"]');fill('#email','sharath@example.com');fill('#password','secure-password');fill('#confirm-password','secure-password');fill('#name','Sharath');
-  await submit('#auth-form');assert.match($('#auth-error').textContent,/Verify your email/);await click('#send-code');fill('#otp','123456');await click('#verify-code');await submit('#auth-form');assert($('.report-entry'));assert(!$('#report-form'));
+  await submit('#auth-form');assert.match($('#auth-error').textContent,/Verify your email/);await click('#send-code');fill('#otp','123456');await click('#verify-code');await submit('#auth-form');assert($('.report-entry'));assert($('#report-form'));assert.equal($('#report-tab').getAttribute('aria-selected'),'true');
   await click('[data-action="profile"]');fill('#profile-email','new@example.com');await submit('#profile-form');assert.match($('#profile-error').textContent,/Verify the new email/);
   await click('#profile-send');fill('#profile-otp','123456');await click('#profile-verify');fill('#profile-email','other@example.com');await submit('#profile-form');assert.match($('#profile-error').textContent,/Verify/);
   fill('#profile-email','sharath@example.com');fill('#profile-name','Updated name');await submit('#profile-form');assert.equal($('.avatar').textContent,'U');assert(requests.some(r=>r.url==='/me'&&r.body.name==='Updated name'));

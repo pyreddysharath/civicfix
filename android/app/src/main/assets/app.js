@@ -118,6 +118,7 @@ function homeSection(html){
  alignFields();
 }
 function landing(){
+ if(active==='home')active='report';
  homeSection('<div id="content"></div>');
  if(active==='report')renderReport();
 }
