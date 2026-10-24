@@ -33,12 +33,14 @@ header{padding-left:20px;padding-right:20px}header .header-location{margin-right
 
 .home-actions[role=tablist]{gap:12px;border-bottom:0;padding:4px 0}.home-actions[role=tablist] [role=tab]{border:1px solid transparent;border-radius:14px 14px 6px 6px;min-height:56px;padding:15px 10px;font-weight:650;box-shadow:0 2px 4px #243b3208}.home-actions[role=tablist] #report-tab{border-color:#b9d4c3}.home-actions[role=tablist] #issues-tab{border-color:#bed3e5}.home-actions[role=tablist] #report-tab[aria-selected=true]{background:#215d4f;color:white;border-color:#215d4f;box-shadow:0 3px 0 #123d32}.home-actions[role=tablist] #issues-tab[aria-selected=true]{background:#285a7b;color:white;border-color:#285a7b;box-shadow:0 3px 0 #173d58}.home-actions[role=tablist] [role=tab]:focus-visible{outline:3px solid #a8c2b6;outline-offset:3px}
 
-/* Nenu Saitham circular emblem branding: consistent across app screens */
-:root{--nenu-logo:url("nenu-saitham-logo.png")}
-body{background-color:#f6f8f5;background-image:linear-gradient(rgba(250,252,250,.91),rgba(250,252,250,.91)),var(--nenu-logo);background-position:center center;background-size:cover, min(76vw,540px) auto;background-repeat:no-repeat;background-attachment:fixed}
+/* Shared original artwork, bundled for offline Android and web use. */
+:root{--nenu-logo:url("nenu-saitham-logo.jpg")}
+body{background-color:#f5f4ed;background-image:linear-gradient(rgba(248,248,241,.82),rgba(248,248,241,.82)),var(--nenu-logo);background-position:center;background-size:cover,min(90vw,650px) auto;background-repeat:no-repeat;background-attachment:fixed}
 #app{min-height:100vh}
-header{position:relative;z-index:1;min-height:90px;height:auto}
+header{position:relative;z-index:1;height:auto;min-height:90px}
 .brand{flex-direction:row;justify-content:center;min-width:0}
-.nenu-brand-logo{display:block;width:clamp(68px,11vw,100px);height:clamp(68px,11vw,100px);object-fit:contain;border-radius:50%;flex-shrink:0}
-.panel,.issue-card,.issue-open,.map-dialog{background-color:rgba(255,255,255,.94)}
-@media(max-width:480px){header{min-height:78px;height:auto}.nenu-brand-logo{width:70px;height:70px}body{background-size:cover,min(82vw,390px) auto}}
+.nenu-brand-logo{display:block;width:84px;height:91px;object-fit:contain;flex-shrink:0;border-radius:8px}
+.panel,.issue-section{background-color:rgba(255,255,255,.82)}
+.issue-card.open,.issue-card.overdue,.issue-card.resolved{background-color:rgba(255,255,255,.86)}
+dialog{background-color:#f8f8f1;background-image:linear-gradient(rgba(250,250,245,.92),rgba(250,250,245,.92)),var(--nenu-logo);background-position:center;background-size:cover,contain;background-repeat:no-repeat}
+@media(max-width:480px){.nenu-brand-logo{width:72px;height:78px}}

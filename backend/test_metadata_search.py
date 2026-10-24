@@ -37,7 +37,7 @@ class MetadataSearchTests(unittest.TestCase):
     def test_brand_asset_served_as_image(self):
         import server, io
         responses=[]
-        body=b''.join(server.application({'REQUEST_METHOD':'GET','PATH_INFO':'/torch-logo.jpg','wsgi.input':io.BytesIO(b'')},lambda status,headers: responses.append((status,dict(headers)))))
+        body=b''.join(server.application({'REQUEST_METHOD':'GET','PATH_INFO':'/nenu-saitham-logo.jpg','wsgi.input':io.BytesIO(b'')},lambda status,headers: responses.append((status,dict(headers)))))
         self.assertEqual(responses[0][0],'200 OK')
         self.assertEqual(responses[0][1]['Content-Type'],'image/jpeg')
         self.assertTrue(body.startswith(b'\xff\xd8\xff'))
