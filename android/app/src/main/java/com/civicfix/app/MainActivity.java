@@ -36,7 +36,7 @@ public class MainActivity extends Activity {
                 Uri u=request.getUrl();
                 if("https".equals(u.getScheme()) && "app.civicfix.local".equals(u.getHost())){
                     String path=u.getPath(); if("/".equals(path))path="/index.html";
-                    if(!Arrays.asList("/index.html","/app.js","/style.css","/leaflet.js","/leaflet.css","/torch-logo.jpg").contains(path))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));
+                    if(!Arrays.asList("/index.html","/app.js","/style.css","/leaflet.js","/leaflet.css","/torch-logo.jpg","/nenu-saitham-logo.jpg").contains(path))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));
                     try{return new WebResourceResponse(path.endsWith(".jpg")?"image/jpeg":path.endsWith(".js")?"application/javascript":path.endsWith(".css")?"text/css":"text/html","UTF-8",getAssets().open(path.substring(1)));}catch(Exception e){return null;}
                 }
                 // Only map images may load externally. Scripts remain bundled in the app.

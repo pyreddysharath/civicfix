@@ -393,7 +393,7 @@ def application(env,start_response):
     try:
         from urllib.parse import parse_qs
         method=env['REQUEST_METHOD']; path=env.get('PATH_INFO',''); body={}
-        if method=='GET' and path in ('/','/index.html','/app.js','/style.css','/leaflet.js','/leaflet.css','/torch-logo.jpg'):
+        if method=='GET' and path in ('/','/index.html','/app.js','/style.css','/leaflet.js','/leaflet.css','/torch-logo.jpg','/nenu-saitham-logo.jpg'):
             name='index.html' if path=='/' else path[1:]
             asset=Path(__file__).parent.parent/'android/app/src/main/assets'/name
             if not asset.is_file(): raise ApiError('Web assets are not installed.',404)
